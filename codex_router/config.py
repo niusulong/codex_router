@@ -7,8 +7,19 @@ from pathlib import Path
 from typing import Optional
 
 import yaml
-from pydantic import Field
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
+
+
+class PresetConfig(BaseModel):
+    """模型预设配置"""
+    name: str
+    base_url: str
+    api_key: str
+    model: str
+    timeout: float = 120.0
+    api_format: str = "openai"
+    created_at: Optional[float] = None
 
 
 class UpstreamConfig(BaseSettings):
@@ -23,6 +34,10 @@ class UpstreamConfig(BaseSettings):
     timeout: float = Field(
         default=120.0,
         description="Upstream request timeout in seconds",
+    )
+    api_format: str = Field(
+        default="openai",
+        description="Upstream API format: openai or anthropic",
     )
 
     model_config = {"env_prefix": "CODEX_ROUTER_UPSTREAM__"}
@@ -54,7 +69,7 @@ class ProxyConfig(BaseSettings):
     server: ServerConfig = Field(default_factory=ServerConfig)
     codex: CodexConfig = Field(default_factory=CodexConfig)
     passthrough_api_key: bool = Field(
-        default=True,
+        default=False,
         description="If true, use the API key from the incoming request when upstream.api_key is empty",
     )
     ignored_builtin_tools: list[str] = Field(
@@ -71,8 +86,53 @@ class ProxyConfig(BaseSettings):
         default=None,
         description="If set, override the model name in all requests",
     )
+    presets: list[PresetConfig] = Field(
+        default_factory=list,
+        description="Model preset configurations",
+    )
+    active_preset: Optional[str] = Field(
+        default=None,
+        description="Name of the currently active preset",
+    )
 
     model_config = {"env_prefix": "CODEX_ROUTER_", "env_nested_delimiter": "__"}
+
+    def to_yaml_dict(self) -> dict:
+        """Serialize to a YAML-friendly dict."""
+        d = {}
+        d["upstream"] = {
+            "base_url": self.upstream.base_url,
+            "api_key": self.upstream.api_key,
+            "timeout": self.upstream.timeout,
+        }
+        if self.upstream.api_format != "openai":
+            d["upstream"]["api_format"] = self.upstream.api_format
+        d["server"] = {
+            "host": self.server.host,
+            "port": self.server.port,
+            "log_level": self.server.log_level,
+        }
+        if self.passthrough_api_key:
+            d["passthrough_api_key"] = self.passthrough_api_key
+        if self.ignored_builtin_tools:
+            d["ignored_builtin_tools"] = self.ignored_builtin_tools
+        if self.model_override:
+            d["model_override"] = self.model_override
+        d["codex"] = {"auto_configure": self.codex.auto_configure}
+        if self.codex.config_dir:
+            d["codex"]["config_dir"] = self.codex.config_dir
+        if self.presets:
+            d["presets"] = [p.model_dump() for p in self.presets]
+        if self.active_preset:
+            d["active_preset"] = self.active_preset
+        return d
+
+    def save_to_file(self, path: Path) -> None:
+        """Serialize to YAML and write atomically (temp + rename)."""
+        from codex_router.codex_config import _atomic_write
+        d = self.to_yaml_dict()
+        content = yaml.dump(d, default_flow_style=False, allow_unicode=True, sort_keys=False)
+        _atomic_write(path, content)
 
 
 def _find_config_path() -> Path | None:
@@ -87,8 +147,13 @@ def _find_config_path() -> Path | None:
     return None
 
 
-def load_config(config_path: str | None = None) -> ProxyConfig:
-    """Load config from config.yaml, with env var overrides."""
+def load_config(config_path: str | None = None) -> tuple[ProxyConfig, Path | None]:
+    """Load config from config.yaml, with env var overrides.
+
+    Priority: env vars > config.yaml > code defaults.
+    Only passes non-None YAML values so env vars can still override.
+    Returns (ProxyConfig, resolved config file path or None).
+    """
     if config_path:
         path = Path(config_path)
     else:
@@ -100,18 +165,18 @@ def load_config(config_path: str | None = None) -> ProxyConfig:
         with open(path, encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
 
-        # Flatten yaml into init_values for ProxyConfig
-        if "upstream" in data:
-            for k, v in data["upstream"].items():
-                init_values.setdefault("upstream", {})[k] = v
-        if "server" in data:
-            for k, v in data["server"].items():
-                init_values.setdefault("server", {})[k] = v
-        if "codex" in data:
-            for k, v in data["codex"].items():
-                init_values.setdefault("codex", {})[k] = v
+        if "upstream" in data and data["upstream"]:
+            init_values["upstream"] = {k: v for k, v in data["upstream"].items() if v is not None}
+        if "server" in data and data["server"]:
+            init_values["server"] = {k: v for k, v in data["server"].items() if v is not None}
+        if "codex" in data and data["codex"]:
+            init_values["codex"] = {k: v for k, v in data["codex"].items() if v is not None}
         for key in ("passthrough_api_key", "ignored_builtin_tools", "model_override"):
-            if key in data:
+            if key in data and data[key] is not None:
                 init_values[key] = data[key]
+        if "presets" in data and data["presets"] is not None:
+            init_values["presets"] = data["presets"]
+        if "active_preset" in data and data["active_preset"] is not None:
+            init_values["active_preset"] = data["active_preset"]
 
-    return ProxyConfig(**init_values)
+    return ProxyConfig(**init_values), path
