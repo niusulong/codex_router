@@ -77,7 +77,7 @@ def create_router() -> APIRouter:
         t0 = _time.monotonic()
         try:
             if resp_req.stream:
-                return await _handle_streaming(client, upstream_url, headers, cc_req, resp_req.model, timeout, is_anthropic, store, input_items)
+                return await _handle_streaming(client, upstream_url, headers, cc_req, resp_req.model, timeout, is_anthropic, store, input_items, stats, t0)
             else:
                 result = await _handle_non_streaming(client, upstream_url, headers, cc_req, resp_req.model, timeout, is_anthropic, store, input_items)
                 if stats:
@@ -140,13 +140,17 @@ async def _handle_streaming(
     is_anthropic: bool = False,
     store: ResponseStore | None = None,
     input_items: list | str | None = None,
+    stats: Any = None,
+    t0: float = 0,
 ) -> StreamingResponse:
     async def event_generator() -> AsyncGenerator[str, None]:
         response_id = None
         output: list[dict[str, Any]] = []
+        stream_status = 200
 
         async with client.stream("POST", upstream_url, json=cc_req, headers=headers, timeout=timeout) as resp:
             if resp.status_code != 200:
+                stream_status = resp.status_code
                 error_body = await resp.aread()
                 decoded = error_body.decode(errors="replace")
                 logger.error("Upstream streaming error %d: %s", resp.status_code, decoded[:2000])
@@ -157,27 +161,30 @@ async def _handle_streaming(
                         "error": {"message": f"Upstream returned {resp.status_code}"},
                     },
                 })
-                return
-
-            if is_anthropic:
-                from codex_router.converters.anthropic_streaming import convert_anthropic_stream
-                stream = convert_anthropic_stream(resp.aiter_lines(), model)
             else:
-                stream = convert_stream(resp.aiter_lines(), model)
+                if is_anthropic:
+                    from codex_router.converters.anthropic_streaming import convert_anthropic_stream
+                    stream = convert_anthropic_stream(resp.aiter_lines(), model)
+                else:
+                    stream = convert_stream(resp.aiter_lines(), model)
 
-            async for sse_str in stream:
-                yield sse_str
-                if store is not None and sse_str.startswith("event: response.completed\n"):
-                    for line in sse_str.split("\n"):
-                        if line.startswith("data: "):
-                            try:
-                                data = json.loads(line[6:])
-                                resp_data = data.get("response", {})
-                                response_id = resp_data.get("id")
-                                output = resp_data.get("output", [])
-                            except (json.JSONDecodeError, KeyError):
-                                pass
+                async for sse_str in stream:
+                    yield sse_str
+                    if store is not None and sse_str.startswith("event: response.completed\n"):
+                        for line in sse_str.split("\n"):
+                            if line.startswith("data: "):
+                                try:
+                                    data = json.loads(line[6:])
+                                    resp_data = data.get("response", {})
+                                    response_id = resp_data.get("id")
+                                    output = resp_data.get("output", [])
+                                except (json.JSONDecodeError, KeyError):
+                                    pass
 
+        if stats:
+            latency = (_time.monotonic() - t0) * 1000
+            error_msg = None if stream_status == 200 else f"Upstream {stream_status}"
+            stats.record(model, stream_status, latency, "http", error_msg)
         if store is not None and response_id and input_items is not None:
             store.store(response_id, input_items, output)
 

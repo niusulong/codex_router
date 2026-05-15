@@ -1,4 +1,4 @@
-# Codex Router 配置文件
+﻿# Codex Router 配置文件
 
 upstream:
   # 上游 API 基础地址（Chat Completions 兼容服务）
@@ -7,6 +7,8 @@ upstream:
   api_key: "your-api-key-here"
   # 请求超时（秒）
   timeout: 120
+  # 上游 API 格式: openai (Chat Completions) 或 anthropic (Messages API)
+  # api_format: "openai"
 
 server:
   # 代理监听地址
@@ -37,15 +39,23 @@ codex:
   config_dir: null
 
 # 模型预设（可选）：预定义多套上游配置，通过 Web 管理面板一键切换
+# 支持同时配置 OpenAI 格式和 Anthropic 格式的预设
 # presets:
 #   - name: "DeepSeek"
 #     base_url: "https://api.deepseek.com/v1"
 #     api_key: "sk-xxx"
 #     model: "deepseek-chat"
 #     timeout: 120
+#     # api_format: "openai"  # 默认为 openai
 #   - name: "Qwen"
 #     base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
 #     api_key: "sk-yyy"
 #     model: "qwen-plus"
+#     timeout: 120
+#   - name: "Claude"
+#     base_url: "https://api.anthropic.com"
+#     api_key: "sk-ant-zzz"
+#     model: "claude-sonnet-4-20250514"
+#     api_format: "anthropic"
 #     timeout: 120
 # active_preset: "DeepSeek"
