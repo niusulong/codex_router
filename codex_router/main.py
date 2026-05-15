@@ -12,6 +12,7 @@ from codex_router.codex_config import restore_codex
 from codex_router.config import ProxyConfig, load_config
 from codex_router.config_manager import ConfigManager
 from codex_router.errors import register_error_handlers
+from codex_router.response_store import ResponseStore
 from codex_router.router import create_router
 
 logger = logging.getLogger(__name__)
@@ -36,6 +37,7 @@ def create_app(config: ProxyConfig | None = None, config_path=None) -> FastAPI:
     cm = ConfigManager(config, _config_path)
     app.state.config = config
     app.state.config_manager = cm
+    app.state.response_store = ResponseStore()
 
     register_error_handlers(app)
     app.include_router(create_router())

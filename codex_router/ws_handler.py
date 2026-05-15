@@ -13,6 +13,7 @@ from codex_router.config import ProxyConfig
 from codex_router.converters.request import convert_request
 from codex_router.converters.streaming import convert_stream_events
 from codex_router.models import ResponsesRequest
+from codex_router.response_store import ResponseStore
 
 logger = logging.getLogger(__name__)
 
@@ -80,11 +81,17 @@ async def handle_websocket(ws: WebSocket):
 async def _handle_response_create(ws: WebSocket, event: dict[str, Any], config: ProxyConfig):
     params = {k: v for k, v in event.items() if k != "type"}
 
+    # Resolve previous_response_id → expand conversation history
+    store: ResponseStore = ws.app.state.response_store
+    params = store.resolve(params)
+
     try:
         resp_req = ResponsesRequest(**params)
     except Exception as e:
         await ws.send_json({"type": "error", "message": f"Invalid request: {e}"})
         return
+
+    input_items = resp_req.input
 
     api_key = config.upstream.api_key
     if not api_key:
@@ -130,8 +137,18 @@ async def _handle_response_create(ws: WebSocket, event: dict[str, Any], config: 
                 stream_events = convert_anthropic_stream_events(resp.aiter_lines(), resp_req.model)
             else:
                 stream_events = convert_stream_events(resp.aiter_lines(), resp_req.model)
+
+            response_id = None
+            output_text = ""
             async for event_type, data in stream_events:
                 await ws.send_json(data)
+                if event_type == "response.completed":
+                    resp_data = data.get("response", {})
+                    response_id = resp_data.get("id")
+                    output_text = resp_data.get("output_text", "")
+
+        if response_id:
+            store.store(response_id, input_items, output_text)
     except Exception:
         logger.exception("Upstream request failed in WebSocket")
         try:

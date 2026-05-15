@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, AsyncGenerator
 
@@ -17,6 +18,7 @@ from codex_router.converters.anthropic_response import convert_anthropic_respons
 from codex_router.converters.anthropic_streaming import convert_anthropic_stream
 from codex_router.errors import UpstreamError
 from codex_router.models import ResponsesRequest
+from codex_router.response_store import ResponseStore
 from codex_router.ws_handler import build_upstream_headers, build_upstream_url, handle_websocket
 
 logger = logging.getLogger(__name__)
@@ -34,10 +36,15 @@ def create_router() -> APIRouter:
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}") from e
 
+        store: ResponseStore = request.app.state.response_store
+        body = store.resolve(body)
+
         try:
             resp_req = ResponsesRequest(**body)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Invalid request: {e}") from e
+
+        input_items = resp_req.input
 
         api_key = config.upstream.api_key
         if not api_key and config.passthrough_api_key:
@@ -65,9 +72,9 @@ def create_router() -> APIRouter:
         timeout = config.upstream.timeout
 
         if resp_req.stream:
-            return await _handle_streaming(client, upstream_url, headers, cc_req, resp_req.model, timeout, is_anthropic)
+            return await _handle_streaming(client, upstream_url, headers, cc_req, resp_req.model, timeout, is_anthropic, store, input_items)
         else:
-            return await _handle_non_streaming(client, upstream_url, headers, cc_req, resp_req.model, timeout, is_anthropic)
+            return await _handle_non_streaming(client, upstream_url, headers, cc_req, resp_req.model, timeout, is_anthropic, store, input_items)
 
     @router.websocket("/v1/responses")
     async def ws_responses(ws: WebSocket):
@@ -84,6 +91,8 @@ async def _handle_non_streaming(
     model: str,
     timeout: float,
     is_anthropic: bool = False,
+    store: ResponseStore | None = None,
+    input_items: list | str | None = None,
 ) -> dict[str, Any]:
     try:
         resp = await client.post(upstream_url, json=cc_req, headers=headers, timeout=timeout)
@@ -95,8 +104,14 @@ async def _handle_non_streaming(
         raise UpstreamError(f"Upstream returned {resp.status_code}")
 
     if is_anthropic:
-        return convert_anthropic_response(resp.json(), model)
-    return convert_response(resp.json(), model)
+        result = convert_anthropic_response(resp.json(), model)
+    else:
+        result = convert_response(resp.json(), model)
+
+    if store is not None and input_items is not None:
+        store.store(result["id"], input_items, result.get("output_text", ""))
+
+    return result
 
 
 async def _handle_streaming(
@@ -107,8 +122,13 @@ async def _handle_streaming(
     model: str,
     timeout: float,
     is_anthropic: bool = False,
+    store: ResponseStore | None = None,
+    input_items: list | str | None = None,
 ) -> StreamingResponse:
     async def event_generator() -> AsyncGenerator[str, None]:
+        response_id = None
+        output_text = ""
+
         async with client.stream("POST", upstream_url, json=cc_req, headers=headers, timeout=timeout) as resp:
             if resp.status_code != 200:
                 error_body = await resp.aread()
@@ -125,11 +145,25 @@ async def _handle_streaming(
 
             if is_anthropic:
                 from codex_router.converters.anthropic_streaming import convert_anthropic_stream
-                async for event in convert_anthropic_stream(resp.aiter_lines(), model):
-                    yield event
+                stream = convert_anthropic_stream(resp.aiter_lines(), model)
             else:
-                async for event in convert_stream(resp.aiter_lines(), model):
-                    yield event
+                stream = convert_stream(resp.aiter_lines(), model)
+
+            async for sse_str in stream:
+                yield sse_str
+                if store is not None and sse_str.startswith("event: response.completed\n"):
+                    for line in sse_str.split("\n"):
+                        if line.startswith("data: "):
+                            try:
+                                data = json.loads(line[6:])
+                                resp_data = data.get("response", {})
+                                response_id = resp_data.get("id")
+                                output_text = resp_data.get("output_text", "")
+                            except (json.JSONDecodeError, KeyError):
+                                pass
+
+        if store is not None and response_id and input_items is not None:
+            store.store(response_id, input_items, output_text)
 
     return StreamingResponse(
         event_generator(),
