@@ -1,13 +1,17 @@
-"""Admin API routes and Web UI for Codex Router management panel."""
+﻿"""Admin API routes and Web UI for Codex Router management panel."""
 
 from __future__ import annotations
 
+import json as _json
 import logging
+import platform
+import sys
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
 from codex_router.config import PresetConfig, ProxyConfig
 from codex_router.config_manager import ConfigManager
@@ -65,8 +69,8 @@ def create_admin_router() -> APIRouter:
             "upstream": {
                 "base_url": config.upstream.base_url,
                 "api_key": _mask_key(config.upstream.api_key),
-                "timeout": config.upstream.timeout,
                 "api_format": config.upstream.api_format,
+                "timeout": config.upstream.timeout,
             },
             "model_override": config.model_override,
             "server": {
@@ -173,5 +177,113 @@ def create_admin_router() -> APIRouter:
     async def get_logs(request: Request):
         cm: ConfigManager = request.app.state.config_manager
         return cm.get_logs()
+
+    # ── Stats ──
+
+    @router.get("/api/stats", dependencies=[Depends(_local_only)])
+    async def get_stats(request: Request):
+        from codex_router.stats import RequestStats
+        stats: RequestStats | None = getattr(request.app.state, "request_stats", None)
+        if stats is None:
+            return {"uptime_seconds": 0, "total_requests": 0, "success_count": 0, "fail_count": 0, "active_connections": 0, "avg_latency_ms": 0, "last_request_at": None}
+        return stats.get_summary()
+
+    @router.get("/api/stats/requests", dependencies=[Depends(_local_only)])
+    async def get_stats_requests(request: Request):
+        from codex_router.stats import RequestStats
+        stats: RequestStats | None = getattr(request.app.state, "request_stats", None)
+        if stats is None:
+            return []
+        return stats.get_recent(100)
+
+    # ── Export / Import ──
+
+    @router.get("/api/stats/export", dependencies=[Depends(_local_only)])
+    async def export_config(request: Request):
+        cm: ConfigManager = request.app.state.config_manager
+        presets = [p.model_dump() for p in cm.list_presets()]
+        data = {
+            "presets": presets,
+            "active_preset": cm.active_preset_name,
+            "ignored_builtin_tools": cm.config.ignored_builtin_tools,
+            "timeout": cm.config.upstream.timeout,
+            "api_format": cm.config.upstream.api_format,
+        }
+        content = _json.dumps(data, indent=2, ensure_ascii=False)
+        buf = BytesIO(content.encode("utf-8"))
+        return StreamingResponse(
+            buf,
+            media_type="application/json",
+            headers={"Content-Disposition": "attachment; filename=codex_router_config.json"},
+        )
+
+    @router.post("/api/stats/import", dependencies=[Depends(_local_only)])
+    async def import_config(request: Request):
+        cm: ConfigManager = request.app.state.config_manager
+        body = await request.json()
+        presets_data = body.get("presets", [])
+        imported = 0
+        skipped = 0
+        for p_data in presets_data:
+            try:
+                preset = PresetConfig(**p_data)
+            except Exception:
+                skipped += 1
+                continue
+            if preset.name in [p.name for p in cm.list_presets()]:
+                skipped += 1
+                continue
+            await cm.add_preset(preset)
+            imported += 1
+
+        if "ignored_builtin_tools" in body:
+            cm.config.ignored_builtin_tools = body["ignored_builtin_tools"]
+        if "timeout" in body:
+            cm.config.upstream.timeout = float(body["timeout"])
+        if "api_format" in body:
+            cm.config.upstream.api_format = body["api_format"]
+        await cm.save_config()
+
+        return {"ok": True, "message": f"导入完成: {imported} 个预设已添加, {skipped} 个已跳过", "imported": imported, "skipped": skipped}
+
+    # ── Restore Codex ──
+
+    @router.post("/api/codex/restore", dependencies=[Depends(_local_only)])
+    async def restore_codex_config(request: Request):
+        from codex_router.main import _backup, _config
+        if _backup is not None and _config is not None:
+            try:
+                from codex_router.codex_config import restore_codex
+                restore_codex(_config, _backup)
+                return {"ok": True, "message": "Codex CLI 原始配置已恢复"}
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"恢复失败: {e}")
+        return {"ok": True, "message": "无备份需要恢复（未启用自动配置或已恢复）"}
+
+    # ── System Info ──
+
+    @router.get("/api/system", dependencies=[Depends(_local_only)])
+    async def get_system_info(request: Request):
+        import os
+        try:
+            import psutil
+            mem = psutil.virtual_memory()
+            mem_info = {"total_mb": round(mem.total / 1024 / 1024), "used_mb": round(mem.used / 1024 / 1024), "percent": mem.percent}
+        except ImportError:
+            mem_info = None
+
+        try:
+            from codex_router import __version__
+            version = __version__
+        except Exception:
+            version = "dev"
+
+        return {
+            "python_version": sys.version.split()[0],
+            "router_version": version,
+            "platform": platform.system(),
+            "platform_release": platform.release(),
+            "memory": mem_info,
+        }
 
     return router

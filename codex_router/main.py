@@ -1,4 +1,4 @@
-"""Codex Router — local proxy converting Responses API to Chat Completions API."""
+﻿"""Codex Router — local proxy converting Responses API to Chat Completions API."""
 
 import atexit
 import logging
@@ -16,6 +16,7 @@ from codex_router.config_manager import ConfigManager
 from codex_router.errors import register_error_handlers
 from codex_router.response_store import ResponseStore
 from codex_router.router import create_router
+from codex_router.stats import RequestStats
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,7 @@ def create_app(config: ProxyConfig | None = None, config_path=None) -> FastAPI:
     app.state.config = config
     app.state.config_manager = cm
     app.state.response_store = ResponseStore()
+    app.state.request_stats = RequestStats()
 
     register_error_handlers(app)
     app.include_router(create_router())

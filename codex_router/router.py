@@ -1,9 +1,10 @@
-"""FastAPI route handler for /v1/responses (HTTP + WebSocket)."""
+﻿"""FastAPI route handler for /v1/responses (HTTP + WebSocket)."""
 
 from __future__ import annotations
 
 import json
 import logging
+import time as _time
 from typing import Any, AsyncGenerator
 
 from fastapi import APIRouter, HTTPException, Request, WebSocket
@@ -30,6 +31,7 @@ def create_router() -> APIRouter:
     @router.post("/v1/responses")
     async def create_response(request: Request):
         config: ProxyConfig = request.app.state.config
+        stats = getattr(request.app.state, "request_stats", None)
 
         try:
             body = await request.json()
@@ -45,6 +47,7 @@ def create_router() -> APIRouter:
             raise HTTPException(status_code=400, detail=f"Invalid request: {e}") from e
 
         input_items = resp_req.input
+        model = resp_req.model
 
         api_key = config.upstream.api_key
         if not api_key and config.passthrough_api_key:
@@ -71,10 +74,23 @@ def create_router() -> APIRouter:
         client: Any = request.app.state.http_client
         timeout = config.upstream.timeout
 
-        if resp_req.stream:
-            return await _handle_streaming(client, upstream_url, headers, cc_req, resp_req.model, timeout, is_anthropic, store, input_items)
-        else:
-            return await _handle_non_streaming(client, upstream_url, headers, cc_req, resp_req.model, timeout, is_anthropic, store, input_items)
+        t0 = _time.monotonic()
+        try:
+            if resp_req.stream:
+                return await _handle_streaming(client, upstream_url, headers, cc_req, resp_req.model, timeout, is_anthropic, store, input_items)
+            else:
+                result = await _handle_non_streaming(client, upstream_url, headers, cc_req, resp_req.model, timeout, is_anthropic, store, input_items)
+                if stats:
+                    stats.record(model, 200, (_time.monotonic() - t0) * 1000, "http")
+                return result
+        except UpstreamError as exc:
+            if stats:
+                stats.record(model, 502, (_time.monotonic() - t0) * 1000, "http", str(exc))
+            raise
+        except HTTPException as exc:
+            if stats:
+                stats.record(model, exc.status_code, (_time.monotonic() - t0) * 1000, "http", exc.detail)
+            raise
 
     @router.websocket("/v1/responses")
     async def ws_responses(ws: WebSocket):

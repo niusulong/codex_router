@@ -1,192 +1,519 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-theme="light">
+<html lang="zh-CN" class="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Codex Router 管理面板</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+    tailwind.config = {
+        darkMode: 'class',
+        theme: {
+            extend: {
+                colors: {
+                    primary: { 50:'#eff6ff',100:'#dbeafe',200:'#bfdbfe',300:'#93c5fd',400:'#60a5fa',500:'#3b82f6',600:'#2563eb',700:'#1d4ed8',800:'#1e40af',900:'#1e3a8a' },
+                    success: { 50:'#f0fdf4',100:'#dcfce7',400:'#4ade80',500:'#22c55e',600:'#16a34a',700:'#15803d' },
+                    warning: { 50:'#fffbeb',100:'#fef3c7',400:'#facc15',500:'#eab308',600:'#ca8a04' },
+                    danger:  { 50:'#fef2f2',100:'#fee2e2',400:'#f87171',500:'#ef4444',600:'#dc2626',700:'#b91c1c' },
+                }
+            }
+        }
+    }
+    </script>
     <style>
-        body { max-width: 900px; margin: 0 auto; padding: 1rem; }
-        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
-        .header h1 { margin: 0; font-size: 1.4rem; }
-        .status-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #4caf50; margin-right: 6px; }
-        .status-text { font-size: 0.85rem; color: #666; }
-        .card { border: 1px solid #ddd; border-radius: 8px; padding: 1rem 1.25rem; margin-bottom: 1.25rem; }
-        .card h2 { margin: 0 0 0.75rem 0; font-size: 1rem; color: #555; }
-        .config-grid { display: grid; grid-template-columns: auto 1fr; gap: 0.35rem 1rem; font-size: 0.9rem; }
-        .config-grid dt { color: #888; font-weight: normal; }
-        .config-grid dd { margin: 0; font-weight: 500; }
-        table { width: 100%; font-size: 0.85rem; }
-        table th { font-size: 0.8rem; text-transform: uppercase; color: #888; }
-        .active-badge { color: #4caf50; font-weight: bold; }
-        .btn-sm { font-size: 0.8rem; padding: 0.2rem 0.6rem; margin-right: 0.3rem; }
-        .inline-msg { font-size: 0.85rem; margin-top: 0.5rem; padding: 0.4rem 0.8rem; border-radius: 4px; display: none; }
-        .inline-msg.success { display: block; background: #e8f5e9; color: #2e7d32; }
-        .inline-msg.error { display: block; background: #fce4ec; color: #c62828; }
-        details summary { cursor: pointer; font-size: 0.9rem; color: #555; }
-        .log-entry { font-size: 0.8rem; color: #666; padding: 0.15rem 0; border-bottom: 1px solid #f0f0f0; }
-        dialog { max-width: 480px; }
-        dialog form { margin: 0; }
-        .form-hint { font-size: 0.75rem; color: #999; margin-top: 0.2rem; }
+        @keyframes pulse-ring { 0% { box-shadow: 0 0 0 0 rgba(34,197,94,0.4); } 70% { box-shadow: 0 0 0 6px rgba(34,197,94,0); } 100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); } }
+        .pulse-ring { animation: pulse-ring 2s infinite; }
+        @keyframes fade-in { from { opacity:0; transform:scale(0.95) } to { opacity:1; transform:scale(1) } }
+        .animate-fade-in { animation: fade-in 0.15s ease-out; }
+        @keyframes slide-in { from { opacity:0; transform:translateX(100%) } to { opacity:1; transform:translateX(0) } }
+        .animate-slide-in { animation: slide-in 0.25s ease-out; }
+        @keyframes toast-out { to { opacity:0; transform:translateX(100%) } }
+        .animate-toast-out { animation: toast-out 0.2s ease-in forwards; }
+        dialog::backdrop { background: rgba(0,0,0,0.4); }
     </style>
 </head>
-<body>
-    <div class="header">
-        <h1>Codex Router 管理面板</h1>
-        <span class="status-text"><span class="status-dot"></span>运行中</span>
-    </div>
+<body class="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 min-h-screen flex flex-col transition-colors duration-200">
 
-    <div class="card">
-        <h2>当前配置</h2>
-        <dl class="config-grid" id="current-config">
-            <dt>预设</dt><dd id="cfg-preset">-</dd>
-            <dt>模型</dt><dd id="cfg-model">-</dd>
-            <dt>上游</dt><dd id="cfg-upstream">-</dd>
-            <dt>密钥</dt><dd id="cfg-key">-</dd>
-            <dt>超时</dt><dd id="cfg-timeout">-</dd>
-        </dl>
-    </div>
+<!-- Toast Container -->
+<div id="toast-container" class="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none"></div>
 
-    <div class="card">
-        <h2>模型预设</h2>
-        <div style="overflow-x:auto;">
-            <table>
-                <thead><tr><th></th><th>名称</th><th>上游地址</th><th>模型</th><th>格式</th><th>操作</th></tr></thead>
-                <tbody id="preset-list"></tbody>
-            </table>
+<!-- Header -->
+<header class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-40">
+    <div class="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+            <svg class="w-6 h-6 text-primary-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+            <h1 class="text-lg font-bold">Codex Router</h1>
+            <span class="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+                <span class="w-2 h-2 rounded-full bg-success-500 pulse-ring inline-block"></span>
+                运行中
+            </span>
         </div>
-        <div style="margin-top:0.75rem;">
-            <button class="btn-sm secondary" onclick="openAddDialog()">+ 添加预设</button>
+        <button onclick="toggleTheme()" class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors" title="切换主题">
+            <svg id="icon-sun" class="w-5 h-5 hidden dark:block" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+            <svg id="icon-moon" class="w-5 h-5 block dark:hidden" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        </button>
+    </div>
+</header>
+
+<!-- Tab Navigation -->
+<nav class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+    <div class="max-w-6xl mx-auto px-4 flex gap-1">
+        <button onclick="switchTab('dashboard')" data-tab="dashboard" class="tab-btn px-4 py-3 text-sm font-medium border-b-2 border-primary-500 text-primary-600 dark:text-primary-400">仪表盘</button>
+        <button onclick="switchTab('presets')" data-tab="presets" class="tab-btn px-4 py-3 text-sm font-medium border-b-2 border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300">预设管理</button>
+        <button onclick="switchTab('settings')" data-tab="settings" class="tab-btn px-4 py-3 text-sm font-medium border-b-2 border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300">设置</button>
+    </div>
+</nav>
+
+<!-- Main Content -->
+<main class="flex-1 max-w-6xl mx-auto w-full px-4 py-6">
+
+    <!-- Dashboard Tab -->
+    <div id="tab-dashboard" class="tab-content">
+        <!-- Stats Cards -->
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            <div class="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
+                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">运行时长</div>
+                <div id="stat-uptime" class="text-xl font-bold">-</div>
+            </div>
+            <div class="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
+                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">总请求</div>
+                <div class="text-xl font-bold"><span id="stat-total">0</span> <span class="text-sm font-normal text-success-600" id="stat-success"></span> <span class="text-sm font-normal text-danger-600" id="stat-fail"></span></div>
+            </div>
+            <div class="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
+                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">平均延迟</div>
+                <div id="stat-latency" class="text-xl font-bold">-</div>
+            </div>
+            <div class="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
+                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">上次请求</div>
+                <div id="stat-last" class="text-xl font-bold">-</div>
+            </div>
         </div>
-        <div class="inline-msg" id="preset-msg"></div>
+
+        <!-- Active Config Card -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl p-5 border border-gray-200 dark:border-gray-700 mb-6">
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">当前配置</h2>
+                <button onclick="copyProxyUrl()" class="text-xs px-3 py-1 rounded-md bg-primary-50 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 hover:bg-primary-100 dark:hover:bg-primary-900/50 transition-colors">复制代理地址</button>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
+                <div><span class="text-gray-400">预设</span><div id="cfg-preset" class="font-semibold text-lg mt-0.5">-</div></div>
+                <div><span class="text-gray-400">模型</span><div id="cfg-model" class="font-semibold mt-0.5 truncate">-</div></div>
+                <div><span class="text-gray-400">上游地址</span><div id="cfg-upstream" class="font-mono text-xs mt-1 truncate">-</div></div>
+                <div><span class="text-gray-400">API 格式</span><div id="cfg-format" class="mt-0.5"><span class="px-2 py-0.5 text-xs rounded-full bg-gray-100 dark:bg-gray-700">openai</span></div></div>
+            </div>
+        </div>
+
+        <!-- Quick Actions -->
+        <div class="flex flex-wrap gap-2 mb-6">
+            <button onclick="restoreCodex()" class="px-4 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                恢复 Codex 配置
+            </button>
+            <button onclick="exportConfig()" class="px-4 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                导出配置
+            </button>
+            <button onclick="importConfig()" class="px-4 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-1.5">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+                导入配置
+            </button>
+        </div>
+
+        <!-- Recent Requests -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+            <div class="px-5 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                <h2 class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">最近请求</h2>
+                <span class="text-xs text-gray-400" id="requests-auto-refresh">自动刷新中</span>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead><tr class="border-b border-gray-100 dark:border-gray-700 text-gray-400 text-xs uppercase">
+                        <th class="px-5 py-2 text-left font-medium">时间</th>
+                        <th class="px-5 py-2 text-left font-medium">模型</th>
+                        <th class="px-5 py-2 text-left font-medium">方法</th>
+                        <th class="px-5 py-2 text-left font-medium">状态</th>
+                        <th class="px-5 py-2 text-left font-medium">耗时</th>
+                        <th class="px-5 py-2 text-left font-medium">错误</th>
+                    </tr></thead>
+                    <tbody id="requests-list"></tbody>
+                </table>
+            </div>
+            <div id="requests-empty" class="px-5 py-8 text-center text-gray-400 text-sm hidden">暂无请求记录</div>
+        </div>
     </div>
 
-    <div class="card">
-        <h2>通用配置</h2>
-        <div class="grid">
-            <label>超时 (秒)
-                <input type="number" id="set-timeout" min="10" max="600" step="10">
-            </label>
-            <label>自动配置 Codex
-                <input type="checkbox" id="set-auto-configure">
-            </label>
+    <!-- Presets Tab -->
+    <div id="tab-presets" class="tab-content hidden">
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">模型预设</h2>
+            <button onclick="openAddDialog()" class="px-4 py-2 text-sm rounded-lg bg-primary-500 text-white hover:bg-primary-600 transition-colors flex items-center gap-1.5">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+                添加预设
+            </button>
         </div>
-        <label>过滤工具 <span style="font-size:0.75rem;color:#999">(逗号分隔)</span>
-            <input type="text" id="set-tools">
-        </label>
-        <div style="margin-top:0.75rem;">
-            <button class="btn-sm" onclick="saveSettings()">保存</button>
-            <div class="inline-msg" id="settings-msg"></div>
+        <div id="presets-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+        <div id="presets-empty" class="hidden text-center py-16">
+            <svg class="w-16 h-16 mx-auto text-gray-300 dark:text-gray-600 mb-4" fill="none" stroke="currentColor" stroke-width="1" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
+            <p class="text-gray-400 mb-4">还没有预设，添加你的第一个模型预设</p>
+            <button onclick="openAddDialog()" class="px-4 py-2 text-sm rounded-lg bg-primary-500 text-white hover:bg-primary-600 transition-colors">添加预设</button>
         </div>
     </div>
 
-    <div class="card">
-        <details id="logs-details">
-            <summary>操作日志</summary>
-            <div id="log-list" style="margin-top:0.5rem;"></div>
-        </details>
-    </div>
-
-    <dialog id="preset-dialog">
-        <article>
-            <h3 id="dialog-title">添加预设</h3>
-            <form id="preset-form" onsubmit="return false;">
-                <label>名称 <input type="text" id="f-name" required></label>
-                <label>上游地址 <input type="url" id="f-base-url" required placeholder="https://api.example.com/v1"></label>
-                <label>API Key <input type="text" id="f-api-key">
-                    <span class="form-hint">留空则保留原密钥</span>
-                </label>
-                <label>模型 <input type="text" id="f-model" required></label>
-                <label>超时 (秒) <input type="number" id="f-timeout" value="120" min="10" max="600"></label>
-                <label>API 格式
-                    <select id="f-api-format">
-                        <option value="openai">OpenAI (Chat Completions)</option>
-                        <option value="anthropic">Anthropic (Messages)</option>
-                    </select>
-                </label>
-                <div class="grid" style="margin-top:1rem;">
-                    <button class="outline" type="button" onclick="closeDialog()">取消</button>
-                    <button type="button" onclick="submitPreset()">保存</button>
+    <!-- Settings Tab -->
+    <div id="tab-settings" class="tab-content hidden">
+        <div class="max-w-2xl">
+            <!-- General Settings -->
+            <div class="bg-white dark:bg-gray-800 rounded-xl p-5 border border-gray-200 dark:border-gray-700 mb-6">
+                <h2 class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-4">通用配置</h2>
+                <div class="space-y-5">
+                    <div>
+                        <label class="block text-sm font-medium mb-1.5">代理超时 (秒)</label>
+                        <div class="flex items-center gap-3">
+                            <input type="range" id="set-timeout" min="10" max="600" step="10" class="flex-1 accent-primary-500" oninput="document.getElementById('timeout-val').textContent=this.value">
+                            <span id="timeout-val" class="text-sm font-mono w-8 text-right">120</span>
+                        </div>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <label class="text-sm font-medium">自动配置 Codex</label>
+                        <button id="set-auto-configure" onclick="this.classList.toggle('bg-primary-500');this.classList.toggle('bg-gray-300');this.classList.toggle('dark:bg-gray-600')" class="relative w-11 h-6 rounded-full bg-gray-300 dark:bg-gray-600 transition-colors">
+                            <span class="absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform"></span>
+                        </button>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1.5">API 格式</label>
+                        <select id="set-api-format" class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:outline-none">
+                            <option value="openai">OpenAI (Chat Completions)</option>
+                            <option value="anthropic">Anthropic (Messages)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1.5">过滤工具</label>
+                        <div id="tools-tags" class="flex flex-wrap gap-2 mb-2"></div>
+                        <div class="flex gap-2">
+                            <input type="text" id="tools-input" placeholder="输入工具名" class="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-1.5 text-sm focus:ring-2 focus:ring-primary-500 focus:outline-none" onkeydown="if(event.key==='Enter'){addTool();event.preventDefault()}">
+                            <button onclick="addTool()" class="px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">添加</button>
+                        </div>
+                    </div>
                 </div>
-            </form>
-        </article>
-    </dialog>
+                <div class="mt-5 pt-4 border-t border-gray-100 dark:border-gray-700">
+                    <button onclick="saveSettings()" class="px-4 py-2 text-sm rounded-lg bg-primary-500 text-white hover:bg-primary-600 transition-colors">保存设置</button>
+                </div>
+            </div>
+
+            <!-- Operation Logs -->
+            <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+                <div class="px-5 py-3 border-b border-gray-200 dark:border-gray-700">
+                    <h2 class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">操作日志</h2>
+                </div>
+                <div id="log-list" class="divide-y divide-gray-100 dark:divide-gray-700 max-h-96 overflow-y-auto"></div>
+                <div id="logs-empty" class="px-5 py-8 text-center text-gray-400 text-sm hidden">暂无操作日志</div>
+            </div>
+        </div>
+    </div>
+</main>
+
+<!-- Footer -->
+<footer class="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 py-3">
+    <div class="max-w-6xl mx-auto px-4 flex items-center justify-between text-xs text-gray-400">
+        <span>Codex Router</span>
+        <span id="footer-version">v-</span>
+    </div>
+</footer>
+
+<!-- Preset Dialog -->
+<dialog id="preset-dialog" class="rounded-xl p-0 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-xl w-full max-w-md backdrop:bg-black/40">
+    <div class="p-5">
+        <h3 id="dialog-title" class="text-lg font-bold mb-4">添加预设</h3>
+        <form id="preset-form" onsubmit="return false" class="space-y-4">
+            <div>
+                <label class="block text-sm font-medium mb-1">名称</label>
+                <input type="text" id="f-name" required class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:outline-none">
+            </div>
+            <div>
+                <label class="block text-sm font-medium mb-1">上游地址</label>
+                <input type="url" id="f-base-url" required placeholder="https://api.example.com/v1" class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:outline-none">
+            </div>
+            <div>
+                <label class="block text-sm font-medium mb-1">API Key <span class="text-gray-400 font-normal text-xs">(留空保留原密钥)</span></label>
+                <input type="text" id="f-api-key" class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:outline-none">
+            </div>
+            <div>
+                <label class="block text-sm font-medium mb-1">模型</label>
+                <input type="text" id="f-model" required class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:outline-none">
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium mb-1">超时 (秒)</label>
+                    <input type="number" id="f-timeout" value="120" min="10" max="600" class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">API 格式</label>
+                    <select id="f-api-format" class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:outline-none">
+                        <option value="openai">OpenAI</option>
+                        <option value="anthropic">Anthropic</option>
+                    </select>
+                </div>
+            </div>
+        </form>
+        <div class="flex justify-end gap-3 mt-5 pt-4 border-t border-gray-100 dark:border-gray-700">
+            <button onclick="closeDialog()" class="px-4 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">取消</button>
+            <button onclick="submitPreset()" class="px-4 py-2 text-sm rounded-lg bg-primary-500 text-white hover:bg-primary-600 transition-colors">保存</button>
+        </div>
+    </div>
+</dialog>
+
+<!-- Confirm Dialog -->
+<dialog id="confirm-dialog" class="rounded-xl p-0 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-xl w-full max-w-sm backdrop:bg-black/40">
+    <div class="p-5">
+        <h3 class="text-lg font-bold mb-2">确认操作</h3>
+        <p id="confirm-message" class="text-sm text-gray-600 dark:text-gray-400 mb-5"></p>
+        <div class="flex justify-end gap-3">
+            <button onclick="closeConfirm(false)" class="px-4 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">取消</button>
+            <button onclick="closeConfirm(true)" class="px-4 py-2 text-sm rounded-lg bg-primary-500 text-white hover:bg-primary-600 transition-colors">确认</button>
+        </div>
+    </div>
+</dialog>
+
+<!-- Import file input (hidden) -->
+<input type="file" id="import-file" accept=".json" class="hidden" onchange="handleImportFile(event)">
 
 <script>
 const API = '/admin/api';
 let _editingName = null;
+let _confirmResolve = null;
+let _tools = [];
+let _statsTimer = null;
+let _currentTab = 'dashboard';
+
+// ── Theme ──
+
+function toggleTheme() {
+    document.documentElement.classList.toggle('dark');
+    localStorage.setItem('theme', document.documentElement.classList.contains('dark') ? 'dark' : 'light');
+}
+
+(function initTheme() {
+    const saved = localStorage.getItem('theme');
+    if (saved === 'dark') document.documentElement.classList.add('dark');
+    else document.documentElement.classList.remove('dark');
+})();
+
+// ── Toast ──
+
+function toast(message, type = 'info') {
+    const container = document.getElementById('toast-container');
+    const colors = {
+        success: 'bg-success-500', error: 'bg-danger-500',
+        warning: 'bg-warning-500', info: 'bg-primary-500'
+    };
+    const icons = {
+        success: '<path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>',
+        error: '<path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>',
+        warning: '<path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01M12 3l9.5 16.5H2.5L12 3z"/>',
+        info: '<path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M12 2a10 10 0 100 20 10 10 0 000-20z"/>'
+    };
+    const el = document.createElement('div');
+    el.className = `pointer-events-auto flex items-center gap-2 px-4 py-2.5 rounded-lg text-white text-sm shadow-lg animate-slide-in ${colors[type]}`;
+    el.innerHTML = `<svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">${icons[type]}</svg><span>${esc(message)}</span><button onclick="this.parentElement.remove()" class="ml-2 opacity-70 hover:opacity-100"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg></button>`;
+    container.appendChild(el);
+    setTimeout(() => { el.classList.add('animate-toast-out'); setTimeout(() => el.remove(), 200); }, 3000);
+}
+
+// ── Confirm ──
+
+function showConfirm(message) {
+    return new Promise(resolve => {
+        _confirmResolve = resolve;
+        document.getElementById('confirm-message').textContent = message;
+        document.getElementById('confirm-dialog').showModal();
+    });
+}
+
+function closeConfirm(result) {
+    document.getElementById('confirm-dialog').close();
+    if (_confirmResolve) { _confirmResolve(result); _confirmResolve = null; }
+}
+
+// ── Tabs ──
+
+function switchTab(name) {
+    _currentTab = name;
+    document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+    document.getElementById('tab-' + name).classList.remove('hidden');
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        const active = btn.dataset.tab === name;
+        btn.classList.toggle('border-primary-500', active);
+        btn.classList.toggle('text-primary-600', active);
+        btn.classList.toggle('dark:text-primary-400', active);
+        btn.classList.toggle('border-transparent', !active);
+        btn.classList.toggle('text-gray-500', !active);
+    });
+    if (name === 'settings') { loadLogs(); loadSettingsData(); }
+    if (name === 'presets') loadPresets();
+    if (name === 'dashboard') { loadDashboard(); startDashboardPolling(); }
+    else stopDashboardPolling();
+}
+
+// ── API helper ──
 
 async function api(path, opts = {}) {
     const res = await fetch(API + path, opts);
     return res.json();
 }
 
-function showMsg(id, text, ok) {
-    const el = document.getElementById(id);
-    el.textContent = text;
-    el.className = 'inline-msg ' + (ok ? 'success' : 'error');
-    setTimeout(() => { el.className = 'inline-msg'; }, 3000);
+function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }
+
+// ── Format helpers ──
+
+function formatUptime(seconds) {
+    if (!seconds) return '-';
+    const d = Math.floor(seconds / 86400), h = Math.floor((seconds % 86400) / 3600), m = Math.floor((seconds % 3600) / 60);
+    if (d > 0) return `${d}天 ${h}时`;
+    if (h > 0) return `${h}时 ${m}分`;
+    return `${m}分`;
 }
 
-async function loadConfig() {
-    const cfg = await api('/config');
-    document.getElementById('cfg-preset').textContent = cfg.active_preset || '-';
-    document.getElementById('cfg-model').textContent = cfg.model_override || '-';
-    document.getElementById('cfg-upstream').textContent = cfg.upstream.base_url;
-    document.getElementById('cfg-key').textContent = cfg.upstream.api_key;
-    document.getElementById('cfg-timeout').textContent = cfg.upstream.timeout + 's';
-    document.getElementById('set-timeout').value = cfg.upstream.timeout;
-    document.getElementById('set-auto-configure').checked = cfg.codex.auto_configure;
-    document.getElementById('set-tools').value = (cfg.ignored_builtin_tools || []).join(', ');
+function timeAgo(ts) {
+    if (!ts) return '-';
+    const diff = Math.floor(Date.now() / 1000 - ts);
+    if (diff < 60) return `${diff}秒前`;
+    if (diff < 3600) return `${Math.floor(diff / 60)}分钟前`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}小时前`;
+    return `${Math.floor(diff / 86400)}天前`;
 }
 
-async function loadPresets() {
-    const presets = await api('/presets');
-    const cfg = await api('/config');
-    const tbody = document.getElementById('preset-list');
-    tbody.innerHTML = presets.map(p => {
-        const active = p.name === cfg.active_preset;
-        return '<tr>' +
-            '<td>' + (active ? '<span class="active-badge">★</span>' : '') + '</td>' +
-            '<td>' + esc(p.name) + '</td>' +
-            '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(p.base_url) + '</td>' +
-            '<td>' + esc(p.model) + '</td>' +
-            '<td><small>' + esc(p.api_format || 'openai') + '</small></td>' +
-            '<td>' + (active
-                ? '<button class="btn-sm outline" onclick="openEditDialog(\'' + esc(p.name) + '\')">编辑</button>' +
-                  '<button class="btn-sm outline" onclick="deletePreset(\'' + esc(p.name) + '\')">删除</button>'
-                : '<button class="btn-sm outline" onclick="verifyPreset(\'' + esc(p.name) + '\')">验证</button>' +
-                  '<button class="btn-sm" onclick="activatePreset(\'' + esc(p.name) + '\')">切换</button>'
-              ) + '</td>' +
-        '</tr>';
+function formatTime(ts) {
+    return new Date(ts * 1000).toLocaleTimeString();
+}
+
+// ── Dashboard ──
+
+async function loadDashboard() {
+    const [stats, requests, config] = await Promise.all([
+        api('/stats'), api('/stats/requests'), api('/config')
+    ]);
+
+    document.getElementById('stat-uptime').textContent = formatUptime(stats.uptime_seconds);
+    document.getElementById('stat-total').textContent = stats.total_requests || 0;
+    document.getElementById('stat-success').textContent = stats.success_count ? `(${stats.success_count} 成功)` : '';
+    document.getElementById('stat-fail').textContent = stats.fail_count ? `(${stats.fail_count} 失败)` : '';
+    document.getElementById('stat-latency').textContent = stats.avg_latency_ms ? stats.avg_latency_ms + 'ms' : '-';
+    document.getElementById('stat-last').textContent = timeAgo(stats.last_request_at);
+
+    document.getElementById('cfg-preset').textContent = config.active_preset || '-';
+    document.getElementById('cfg-model').textContent = config.model_override || '-';
+    document.getElementById('cfg-upstream').textContent = config.upstream.base_url;
+    const fmt = config.upstream.api_format || 'openai';
+    document.getElementById('cfg-format').innerHTML = `<span class="px-2 py-0.5 text-xs rounded-full ${fmt === 'anthropic' ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400' : 'bg-gray-100 dark:bg-gray-700'}">${esc(fmt)}</span>`;
+
+    renderRequests(requests);
+}
+
+function renderRequests(requests) {
+    const tbody = document.getElementById('requests-list');
+    const empty = document.getElementById('requests-empty');
+    if (!requests || !requests.length) {
+        tbody.innerHTML = '';
+        empty.classList.remove('hidden');
+        return;
+    }
+    empty.classList.add('hidden');
+    tbody.innerHTML = requests.slice().reverse().slice(0, 50).map(r => {
+        const statusClass = r.status >= 200 && r.status < 300 ? 'text-success-600' : 'text-danger-600';
+        const methodBadge = r.method === 'websocket'
+            ? '<span class="px-1.5 py-0.5 text-xs rounded bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400">WS</span>'
+            : '<span class="px-1.5 py-0.5 text-xs rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400">HTTP</span>';
+        return `<tr class="border-b border-gray-50 dark:border-gray-700/50 hover:bg-gray-50/50 dark:hover:bg-gray-700/30">
+            <td class="px-5 py-2 text-gray-500 dark:text-gray-400 whitespace-nowrap">${formatTime(r.timestamp)}</td>
+            <td class="px-5 py-2 font-mono text-xs">${esc(r.model)}</td>
+            <td class="px-5 py-2">${methodBadge}</td>
+            <td class="px-5 py-2 font-semibold ${statusClass}">${r.status}</td>
+            <td class="px-5 py-2 text-gray-500">${r.latency_ms}ms</td>
+            <td class="px-5 py-2 text-gray-400 text-xs max-w-[200px] truncate">${esc(r.error || '')}</td>
+        </tr>`;
     }).join('');
 }
 
-function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function startDashboardPolling() {
+    stopDashboardPolling();
+    _statsTimer = setInterval(() => {
+        if (document.hidden) return;
+        loadDashboard();
+    }, 5000);
+}
+
+function stopDashboardPolling() {
+    if (_statsTimer) { clearInterval(_statsTimer); _statsTimer = null; }
+}
+
+// ── Presets ──
+
+async function loadPresets() {
+    const [presets, config] = await Promise.all([api('/presets'), api('/config')]);
+    const grid = document.getElementById('presets-grid');
+    const empty = document.getElementById('presets-empty');
+
+    if (!presets.length) {
+        grid.innerHTML = '';
+        empty.classList.remove('hidden');
+        return;
+    }
+    empty.classList.add('hidden');
+
+    grid.innerHTML = presets.map(p => {
+        const active = p.name === config.active_preset;
+        const borderClass = active ? 'border-success-400 dark:border-success-600 ring-2 ring-success-200 dark:ring-success-800' : 'border-gray-200 dark:border-gray-700';
+        const truncatedUrl = p.base_url.length > 35 ? p.base_url.substring(0, 35) + '...' : p.base_url;
+        const fmtBadge = (p.api_format || 'openai') === 'anthropic'
+            ? '<span class="px-1.5 py-0.5 text-xs rounded bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400">Anthropic</span>'
+            : '<span class="px-1.5 py-0.5 text-xs rounded bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">OpenAI</span>';
+
+        return `<div class="bg-white dark:bg-gray-800 rounded-xl p-4 border-2 ${borderClass} relative transition-all hover:shadow-md ${active ? 'pulse-ring' : ''}">
+            ${active ? '<span class="absolute -top-2 -right-2 px-2 py-0.5 text-xs rounded-full bg-success-500 text-white font-medium">当前使用</span>' : ''}
+            <div class="font-bold text-lg mb-2 ${active ? 'text-success-600 dark:text-success-400' : ''}">${esc(p.name)}</div>
+            <div class="space-y-1 text-sm text-gray-500 dark:text-gray-400 mb-3">
+                <div class="flex items-center gap-1.5"><svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg><span class="font-mono text-xs truncate">${esc(p.model)}</span></div>
+                <div class="flex items-center gap-1.5"><svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg><span class="font-mono text-xs truncate">${esc(truncatedUrl)}</span></div>
+                <div>${fmtBadge}</div>
+            </div>
+            <div class="flex gap-1.5 flex-wrap">
+                ${active
+                    ? `<button onclick="openEditDialog('${esc(p.name)}')" class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors" title="编辑"><svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg></button>
+                       <button onclick="deletePreset('${esc(p.name)}')" class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 hover:text-danger-500 transition-colors" title="删除"><svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button>`
+                    : `<button onclick="activatePreset('${esc(p.name)}')" class="px-3 py-1 text-xs rounded-lg bg-primary-500 text-white hover:bg-primary-600 transition-colors">切换</button>
+                       <button onclick="verifyPreset('${esc(p.name)}')" class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors" title="验证"><svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></button>
+                       <button onclick="openEditDialog('${esc(p.name)}')" class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors" title="编辑"><svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg></button>
+                       <button onclick="deletePreset('${esc(p.name)}')" class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 hover:text-danger-500 transition-colors" title="删除"><svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button>`
+                }
+            </div>
+        </div>`;
+    }).join('');
+}
 
 async function activatePreset(name) {
     const vr = await api('/presets/' + encodeURIComponent(name) + '/verify', { method: 'POST' });
     const msg = vr.ok
-        ? '验证成功 (' + vr.latency_ms + 'ms)。确认切换到 ' + name + '?'
-        : '验证失败: ' + vr.message + '。仍然切换到 ' + name + '?';
-    if (!confirm(msg)) return;
+        ? `验证成功 (${vr.latency_ms}ms)。确认切换到 ${name}?`
+        : `验证失败: ${vr.message}。仍然切换到 ${name}?`;
+    if (!(await showConfirm(msg))) return;
     const res = await api('/presets/' + encodeURIComponent(name) + '/activate', { method: 'POST' });
-    showMsg('preset-msg', res.message, res.ok);
-    loadConfig();
+    toast(res.message, res.ok ? 'success' : 'error');
     loadPresets();
 }
 
 async function verifyPreset(name) {
     const res = await api('/presets/' + encodeURIComponent(name) + '/verify', { method: 'POST' });
-    showMsg('preset-msg', name + ': ' + res.message + ' (' + res.latency_ms + 'ms)', res.ok);
+    toast(`${name}: ${res.message} (${res.latency_ms}ms)`, res.ok ? 'success' : 'error');
 }
 
 async function deletePreset(name) {
-    if (!confirm('确认删除预设 ' + name + '?')) return;
+    if (!(await showConfirm(`确认删除预设 ${name}?`))) return;
     const res = await api('/presets/' + encodeURIComponent(name), { method: 'DELETE' });
-    showMsg('preset-msg', res.message, res.ok);
+    toast(res.message, res.ok ? 'success' : 'error');
     loadPresets();
 }
+
+// ── Dialog ──
 
 function openAddDialog() {
     _editingName = null;
@@ -195,6 +522,7 @@ function openAddDialog() {
     document.getElementById('f-name').disabled = false;
     document.getElementById('f-base-url').value = '';
     document.getElementById('f-api-key').value = '';
+    document.getElementById('f-api-key').placeholder = '';
     document.getElementById('f-model').value = '';
     document.getElementById('f-timeout').value = '120';
     document.getElementById('f-api-format').value = 'openai';
@@ -211,7 +539,7 @@ async function openEditDialog(name) {
     document.getElementById('f-name').disabled = true;
     document.getElementById('f-base-url').value = p.base_url;
     document.getElementById('f-api-key').value = '';
-    document.getElementById('f-api-key').placeholder = p.api_key;
+    document.getElementById('f-api-key').placeholder = p.api_key || '(保留原密钥)';
     document.getElementById('f-model').value = p.model;
     document.getElementById('f-timeout').value = p.timeout;
     document.getElementById('f-api-format').value = p.api_format || 'openai';
@@ -234,48 +562,168 @@ async function submitPreset() {
         const res = await api('/presets/' + encodeURIComponent(_editingName), {
             method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)
         });
-        showMsg('preset-msg', res.message, res.ok);
+        toast(res.message, res.ok ? 'success' : 'error');
     } else {
         data.name = document.getElementById('f-name').value;
+        if (!data.name) { toast('请输入预设名称', 'warning'); return; }
         const res = await api('/presets', {
             method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)
         });
-        showMsg('preset-msg', res.message, res.ok);
+        toast(res.message, res.ok ? 'success' : 'error');
     }
     closeDialog();
-    loadConfig();
     loadPresets();
 }
 
+// ── Settings ──
+
+async function loadSettingsData() {
+    const config = await api('/config');
+    document.getElementById('set-timeout').value = config.upstream.timeout;
+    document.getElementById('timeout-val').textContent = config.upstream.timeout;
+    const btn = document.getElementById('set-auto-configure');
+    const isOn = config.codex.auto_configure;
+    btn.classList.toggle('bg-primary-500', isOn);
+    btn.classList.toggle('bg-gray-300', !isOn);
+    btn.classList.toggle('dark:bg-gray-600', !isOn);
+    btn.querySelector('span').style.transform = isOn ? 'translateX(20px)' : 'translateX(0)';
+    document.getElementById('set-api-format').value = config.upstream.api_format || 'openai';
+    _tools = config.ignored_builtin_tools || [];
+    renderTools();
+}
+
+function renderTools() {
+    document.getElementById('tools-tags').innerHTML = _tools.map(t =>
+        `<span class="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-lg bg-gray-100 dark:bg-gray-700">${esc(t)}<button onclick="removeTool('${esc(t)}')" class="hover:text-danger-500 transition-colors"><svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg></button></span>`
+    ).join('');
+}
+
+function addTool() {
+    const input = document.getElementById('tools-input');
+    const val = input.value.trim();
+    if (val && !_tools.includes(val)) { _tools.push(val); renderTools(); }
+    input.value = '';
+}
+
+function removeTool(name) {
+    _tools = _tools.filter(t => t !== name);
+    renderTools();
+}
+
 async function saveSettings() {
+    const btn = document.getElementById('set-auto-configure');
     const data = {
         timeout: parseFloat(document.getElementById('set-timeout').value),
-        auto_configure: document.getElementById('set-auto-configure').checked,
-        ignored_builtin_tools: document.getElementById('set-tools').value.split(',').map(s => s.trim()).filter(Boolean),
+        auto_configure: btn.classList.contains('bg-primary-500'),
+        ignored_builtin_tools: _tools,
+        api_format: document.getElementById('set-api-format').value,
     };
     const res = await api('/settings', {
         method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)
     });
-    showMsg('settings-msg', res.message, res.ok);
-    loadConfig();
+    toast(res.message, res.ok ? 'success' : 'error');
 }
+
+// ── Logs ──
+
+const _logIcons = {
+    '切换': '<svg class="w-4 h-4 text-primary-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>',
+    '添加': '<svg class="w-4 h-4 text-success-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>',
+    '编辑': '<svg class="w-4 h-4 text-warning-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>',
+    '删除': '<svg class="w-4 h-4 text-danger-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>',
+    '验证': '<svg class="w-4 h-4 text-purple-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>',
+};
 
 async function loadLogs() {
     const logs = await api('/logs');
     const el = document.getElementById('log-list');
-    if (!logs.length) { el.innerHTML = '<div style="color:#999;font-size:0.8rem;">暂无操作日志</div>'; return; }
-    el.innerHTML = logs.map(l => {
-        const t = new Date(l.timestamp * 1000).toLocaleTimeString();
-        return '<div class="log-entry">' + t + ' ' + esc(l.action) + ': ' + esc(l.detail) + '</div>';
-    }).reverse().join('');
+    const empty = document.getElementById('logs-empty');
+    if (!logs.length) { el.innerHTML = ''; empty.classList.remove('hidden'); return; }
+    empty.classList.add('hidden');
+    el.innerHTML = logs.slice().reverse().map(l => {
+        const icon = Object.entries(_logIcons).find(([k]) => l.action.includes(k));
+        const iconHtml = icon ? icon[1] : '<svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></svg>';
+        return `<div class="flex items-center gap-3 px-5 py-2.5 text-sm">
+            ${iconHtml}
+            <span class="text-gray-400 dark:text-gray-500 text-xs whitespace-nowrap">${formatTime(l.timestamp)}</span>
+            <span class="font-medium">${esc(l.action)}</span>
+            <span class="text-gray-500 dark:text-gray-400 text-xs">${esc(l.detail)}</span>
+        </div>`;
+    }).join('');
 }
 
-document.getElementById('logs-details').addEventListener('toggle', function() {
-    if (this.open) loadLogs();
+// ── Quick Actions ──
+
+async function restoreCodex() {
+    if (!(await showConfirm('确认恢复 Codex CLI 的原始配置?'))) return;
+    const res = await api('/codex/restore', { method: 'POST' });
+    toast(res.message, res.ok ? 'success' : 'error');
+}
+
+function exportConfig() {
+    const a = document.createElement('a');
+    a.href = API + '/stats/export';
+    a.download = 'codex_router_config.json';
+    a.click();
+}
+
+function importConfig() {
+    document.getElementById('import-file').click();
+}
+
+async function handleImportFile(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+        const res = await api('/stats/import', {
+            method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)
+        });
+        toast(res.message, res.ok ? 'success' : 'error');
+        if (res.ok) { loadPresets(); loadSettingsData(); }
+    } catch (e) {
+        toast('导入失败: 无效的 JSON 文件', 'error');
+    }
+    event.target.value = '';
+}
+
+function copyProxyUrl() {
+    const url = window.location.origin + '/v1/responses';
+    navigator.clipboard.writeText(url).then(
+        () => toast('代理地址已复制', 'success'),
+        () => toast('复制失败', 'error')
+    );
+}
+
+// ── Version ──
+
+async function loadVersion() {
+    try {
+        const info = await api('/system');
+        document.getElementById('footer-version').textContent = `v${info.router_version || 'dev'} | Python ${info.python_version}`;
+    } catch { /* ignore */ }
+}
+
+// ── Auto-configure toggle styling ──
+
+document.getElementById('set-auto-configure').addEventListener('click', function() {
+    const knob = this.querySelector('span');
+    const isOn = this.classList.contains('bg-primary-500');
+    knob.style.transform = isOn ? 'translateX(0)' : 'translateX(20px)';
 });
 
-loadConfig();
-loadPresets();
+// ── Close dialogs on backdrop click ──
+
+document.querySelectorAll('dialog').forEach(d => {
+    d.addEventListener('click', e => { if (e.target === d) d.close(); });
+});
+
+// ── Init ──
+
+loadDashboard();
+startDashboardPolling();
+loadVersion();
 </script>
 </body>
 </html>

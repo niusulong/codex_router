@@ -1,9 +1,10 @@
-"""WebSocket handler for /v1/responses."""
+﻿"""WebSocket handler for /v1/responses."""
 
 from __future__ import annotations
 
 import json
 import logging
+import time as _time
 from typing import Any
 from urllib.parse import urlparse
 
@@ -58,7 +59,6 @@ async def handle_websocket(ws: WebSocket):
                 await ws.send_json({"type": "error", "message": f"Invalid JSON: {e}"})
                 continue
 
-            # 每次事件循环获取最新配置
             config: ProxyConfig = ws.app.state.config
             event_type = event.get("type", "")
             if event_type == "response.create":
@@ -79,9 +79,12 @@ async def handle_websocket(ws: WebSocket):
 
 
 async def _handle_response_create(ws: WebSocket, event: dict[str, Any], config: ProxyConfig):
-    params = {k: v for k, v in event.items() if k != "type"}
+    # Codex CLI sends {"type":"response.create", "response":{...}}; flatten it
+    params = {k: v for k, v in event.items() if k not in ("type", "response")}
+    if "response" in event and isinstance(event["response"], dict):
+        for k, v in event["response"].items():
+            params.setdefault(k, v)
 
-    # Resolve previous_response_id → expand conversation history
     store: ResponseStore = ws.app.state.response_store
     params = store.resolve(params)
 
@@ -92,11 +95,15 @@ async def _handle_response_create(ws: WebSocket, event: dict[str, Any], config: 
         return
 
     input_items = resp_req.input
+    model = resp_req.model
 
     api_key = config.upstream.api_key
     if not api_key:
         await ws.send_json({"type": "error", "message": "No API key configured"})
         return
+
+    stats = getattr(ws.app.state, "request_stats", None)
+    t0 = _time.monotonic()
 
     is_anthropic = config.upstream.api_format == "anthropic"
     if is_anthropic:
@@ -130,6 +137,8 @@ async def _handle_response_create(ws: WebSocket, event: dict[str, Any], config: 
                         "error": {"message": f"Upstream returned {resp.status_code}"},
                     },
                 })
+                if stats:
+                    stats.record(model, resp.status_code, (_time.monotonic() - t0) * 1000, "websocket", f"Upstream {resp.status_code}")
                 return
 
             if is_anthropic:
@@ -149,8 +158,12 @@ async def _handle_response_create(ws: WebSocket, event: dict[str, Any], config: 
 
         if response_id:
             store.store(response_id, input_items, output)
-    except Exception:
+        if stats:
+            stats.record(model, 200, (_time.monotonic() - t0) * 1000, "websocket")
+    except Exception as exc:
         logger.exception("Upstream request failed in WebSocket")
+        if stats:
+            stats.record(model, 502, (_time.monotonic() - t0) * 1000, "websocket", str(exc))
         try:
             await ws.send_json({
                 "type": "response.failed",
