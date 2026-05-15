@@ -41,9 +41,6 @@ def convert_anthropic_request(req: ResponsesRequest, config: ProxyConfig) -> dic
     if req.stream is not None:
         anthropic_req["stream"] = req.stream
 
-    if req.previous_response_id:
-        logger.warning("previous_response_id is not supported; conversation state is not maintained")
-
     return anthropic_req
 
 

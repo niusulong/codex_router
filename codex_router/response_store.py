@@ -16,10 +16,10 @@ class ResponseStore:
         self._store: dict[str, dict[str, Any]] = {}
         self._order: deque[str] = deque(maxlen=maxlen)
 
-    def store(self, response_id: str, input_items: list | str, output_text: str) -> None:
+    def store(self, response_id: str, input_items: list | str, output: list[dict[str, Any]]) -> None:
         self._store[response_id] = {
             "input_items": input_items,
-            "output_text": output_text,
+            "output": output,
         }
         self._order.append(response_id)
 
@@ -47,15 +47,36 @@ class ResponseStore:
                     history.append(item)
                 else:
                     history.append(item.model_dump() if hasattr(item, "model_dump") else item)
-
-        # Previous response output as assistant message
-        prev_output = prev.get("output_text", "")
-        if prev_output:
+        elif isinstance(prev_input, str):
             history.append({
                 "type": "message",
-                "role": "assistant",
-                "content": prev_output,
+                "role": "user",
+                "content": prev_input,
             })
+
+        # Previous response output (assistant messages + function calls)
+        for item in prev.get("output", []):
+            item_type = item.get("type")
+            if item_type == "message":
+                content = item.get("content", [])
+                if isinstance(content, list):
+                    text = "".join(
+                        part.get("text", "") for part in content if isinstance(part, dict)
+                    )
+                else:
+                    text = str(content)
+                history.append({
+                    "type": "message",
+                    "role": item.get("role", "assistant"),
+                    "content": text,
+                })
+            elif item_type == "function_call":
+                history.append({
+                    "type": "function_call",
+                    "call_id": item.get("call_id", ""),
+                    "name": item.get("name", ""),
+                    "arguments": item.get("arguments", ""),
+                })
 
         # Current input
         current_input = body.get("input", [])

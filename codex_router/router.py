@@ -109,7 +109,7 @@ async def _handle_non_streaming(
         result = convert_response(resp.json(), model)
 
     if store is not None and input_items is not None:
-        store.store(result["id"], input_items, result.get("output_text", ""))
+        store.store(result["id"], input_items, result.get("output", []))
 
     return result
 
@@ -127,7 +127,7 @@ async def _handle_streaming(
 ) -> StreamingResponse:
     async def event_generator() -> AsyncGenerator[str, None]:
         response_id = None
-        output_text = ""
+        output: list[dict[str, Any]] = []
 
         async with client.stream("POST", upstream_url, json=cc_req, headers=headers, timeout=timeout) as resp:
             if resp.status_code != 200:
@@ -158,12 +158,12 @@ async def _handle_streaming(
                                 data = json.loads(line[6:])
                                 resp_data = data.get("response", {})
                                 response_id = resp_data.get("id")
-                                output_text = resp_data.get("output_text", "")
+                                output = resp_data.get("output", [])
                             except (json.JSONDecodeError, KeyError):
                                 pass
 
         if store is not None and response_id and input_items is not None:
-            store.store(response_id, input_items, output_text)
+            store.store(response_id, input_items, output)
 
     return StreamingResponse(
         event_generator(),

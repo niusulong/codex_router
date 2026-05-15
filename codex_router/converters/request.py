@@ -10,6 +10,7 @@ from codex_router.models import (
     InputFunctionCallItem,
     InputFunctionCallOutputItem,
     InputImageContent,
+    InputItem,
     InputMessageItem,
     InputTextContent,
     ResponsesRequest,
@@ -54,14 +55,11 @@ def convert_request(req: ResponsesRequest, config: ProxyConfig) -> dict[str, Any
         if rf:
             cc_req["response_format"] = rf
 
-    if req.previous_response_id:
-        logger.warning("previous_response_id is not supported; conversation state is not maintained")
-
     return cc_req
 
 
 def _convert_input(
-    input_data: str | list,
+    input_data: str | list[InputItem],
 ) -> list[dict[str, Any]]:
     """Convert the `input` field to a messages array."""
     if isinstance(input_data, str):
@@ -104,6 +102,9 @@ def _convert_message_item(item: InputMessageItem) -> dict[str, Any]:
         if isinstance(part, InputTextContent):
             parts.append({"type": "text", "text": part.text})
         elif isinstance(part, InputImageContent):
+            if part.file_id and (".." in part.file_id or "/" in part.file_id or "\\" in part.file_id):
+                logger.warning("file_id contains path traversal characters, skipping: %s", part.file_id)
+                continue
             img: dict[str, Any] = {"url": part.image_url or f"file://{part.file_id}"}
             if part.detail:
                 img["detail"] = part.detail
@@ -130,7 +131,11 @@ def _flush_pending_tool_calls(messages: list[dict[str, Any]]) -> None:
 
 
 def _convert_tools(tools: list[Any], config: ProxyConfig) -> list[dict[str, Any]]:
-    """Convert tools, filtering out unsupported built-in types."""
+    """Convert tools, filtering out unsupported built-in types.
+
+    Supports both Responses API format (flat: {type, name, parameters})
+    and Chat Completions format (nested: {type, function: {name, ...}}).
+    """
     cc_tools: list[dict[str, Any]] = []
     for tool in tools:
         if isinstance(tool, dict):
@@ -139,21 +144,34 @@ def _convert_tools(tools: list[Any], config: ProxyConfig) -> list[dict[str, Any]
                 logger.info("Filtering out built-in tool: %s", tool_type)
                 continue
             if tool_type == "function":
-                fn = tool.get("function", {})
-                cc_tool: dict[str, Any] = {"type": "function", "function": {"name": fn["name"]}}
-                if "description" in fn:
-                    cc_tool["function"]["description"] = fn["description"]
-                if "parameters" in fn:
-                    cc_tool["function"]["parameters"] = fn["parameters"]
-                if "strict" in fn:
-                    cc_tool["function"]["strict"] = fn["strict"]
+                # Responses API format: {type: "function", name: "...", parameters: {...}}
+                # Chat Completions format: {type: "function", function: {name: "...", ...}}
+                fn = tool.get("function")
+                if fn and isinstance(fn, dict):
+                    # Chat Completions format (nested)
+                    cc_tool: dict[str, Any] = {"type": "function", "function": {"name": fn.get("name", "")}}
+                    if "description" in fn:
+                        cc_tool["function"]["description"] = fn["description"]
+                    if "parameters" in fn:
+                        cc_tool["function"]["parameters"] = fn["parameters"]
+                    if "strict" in fn:
+                        cc_tool["function"]["strict"] = fn["strict"]
+                else:
+                    # Responses API format (flat)
+                    cc_tool = {"type": "function", "function": {"name": tool.get("name", "")}}
+                    if "description" in tool:
+                        cc_tool["function"]["description"] = tool["description"]
+                    if "parameters" in tool:
+                        cc_tool["function"]["parameters"] = tool["parameters"]
+                    if "strict" in tool:
+                        cc_tool["function"]["strict"] = tool["strict"]
                 cc_tools.append(cc_tool)
             else:
                 logger.warning("Unsupported tool type: %s", tool_type)
     return cc_tools
 
 
-def _convert_tool_choice(tool_choice: Any) -> Any:
+def _convert_tool_choice(tool_choice: str | dict[str, Any]) -> str | dict[str, Any]:
     """Convert tool_choice from Responses API to Chat Completions format."""
     if isinstance(tool_choice, str):
         return tool_choice
@@ -164,6 +182,11 @@ def _convert_tool_choice(tool_choice: Any) -> Any:
 
 def _convert_text_format(text_format: Any) -> dict[str, Any] | None:
     """Convert text.format to response_format."""
+    from pydantic import BaseModel
+
+    if isinstance(text_format, BaseModel):
+        text_format = text_format.model_dump(exclude_none=True)
+
     if isinstance(text_format, dict):
         fmt_type = text_format.get("type", "")
         if fmt_type == "json_schema" and text_format.get("json_schema"):

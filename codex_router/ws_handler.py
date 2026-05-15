@@ -139,16 +139,16 @@ async def _handle_response_create(ws: WebSocket, event: dict[str, Any], config: 
                 stream_events = convert_stream_events(resp.aiter_lines(), resp_req.model)
 
             response_id = None
-            output_text = ""
+            output: list[dict[str, Any]] = []
             async for event_type, data in stream_events:
                 await ws.send_json(data)
                 if event_type == "response.completed":
                     resp_data = data.get("response", {})
                     response_id = resp_data.get("id")
-                    output_text = resp_data.get("output_text", "")
+                    output = resp_data.get("output", [])
 
         if response_id:
-            store.store(response_id, input_items, output_text)
+            store.store(response_id, input_items, output)
     except Exception:
         logger.exception("Upstream request failed in WebSocket")
         try:
