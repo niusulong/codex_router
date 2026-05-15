@@ -5,6 +5,7 @@ import logging
 import signal
 import threading
 import webbrowser
+from pathlib import Path
 
 import httpx
 import uvicorn
@@ -17,6 +18,7 @@ from codex_router.errors import register_error_handlers
 from codex_router.response_store import ResponseStore
 from codex_router.router import create_router
 from codex_router.stats import RequestStats
+from codex_router.token_db import TokenDB
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +43,10 @@ def create_app(config: ProxyConfig | None = None, config_path=None) -> FastAPI:
     app.state.config = config
     app.state.config_manager = cm
     app.state.response_store = ResponseStore()
-    app.state.request_stats = RequestStats()
+    db_path = _config_path.parent / "token_usage.db" if _config_path else Path("token_usage.db")
+    token_db = TokenDB(db_path)
+    app.state.token_db = token_db
+    app.state.request_stats = RequestStats(token_db=token_db)
 
     register_error_handlers(app)
     app.include_router(create_router())
@@ -63,6 +68,10 @@ async def _lifespan(app: FastAPI):
     yield
     await app.state.http_client.aclose()
     logger.info("Shared httpx.AsyncClient closed")
+    token_db: TokenDB | None = getattr(app.state, "token_db", None)
+    if token_db:
+        token_db.close()
+        logger.info("TokenDB closed")
 
 
 def _restore_on_exit():

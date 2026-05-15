@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Codex Router 管理面板</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
     <script>
     tailwind.config = {
         darkMode: 'class',
@@ -60,6 +61,7 @@
     <div class="max-w-6xl mx-auto px-4 flex gap-1">
         <button onclick="switchTab('dashboard')" data-tab="dashboard" class="tab-btn px-4 py-3 text-sm font-medium border-b-2 border-primary-500 text-primary-600 dark:text-primary-400">仪表盘</button>
         <button onclick="switchTab('presets')" data-tab="presets" class="tab-btn px-4 py-3 text-sm font-medium border-b-2 border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300">预设管理</button>
+        <button onclick="switchTab('usage')" data-tab="usage" class="tab-btn px-4 py-3 text-sm font-medium border-b-2 border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300">用量统计</button>
         <button onclick="switchTab('settings')" data-tab="settings" class="tab-btn px-4 py-3 text-sm font-medium border-b-2 border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300">设置</button>
     </div>
 </nav>
@@ -156,6 +158,76 @@
             <svg class="w-16 h-16 mx-auto text-gray-300 dark:text-gray-600 mb-4" fill="none" stroke="currentColor" stroke-width="1" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
             <p class="text-gray-400 mb-4">还没有预设，添加你的第一个模型预设</p>
             <button onclick="openAddDialog()" class="px-4 py-2 text-sm rounded-lg bg-primary-500 text-white hover:bg-primary-600 transition-colors">添加预设</button>
+        </div>
+    </div>
+
+    <!-- Usage Tab -->
+    <div id="tab-usage" class="tab-content hidden">
+        <!-- Summary Cards -->
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            <div class="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
+                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">总 Token</div>
+                <div id="tok-total" class="text-xl font-bold text-primary-600 dark:text-primary-400">0</div>
+            </div>
+            <div class="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
+                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">输入 Token</div>
+                <div id="tok-input" class="text-xl font-bold text-blue-600 dark:text-blue-400">0</div>
+            </div>
+            <div class="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
+                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">输出 Token</div>
+                <div id="tok-output" class="text-xl font-bold text-emerald-600 dark:text-emerald-400">0</div>
+            </div>
+            <div class="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
+                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">请求数</div>
+                <div id="tok-requests" class="text-xl font-bold">0</div>
+            </div>
+        </div>
+
+        <!-- Per-Preset Table -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 mb-6">
+            <div class="px-5 py-3 border-b border-gray-200 dark:border-gray-700">
+                <h2 class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">按配置统计</h2>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead><tr class="border-b border-gray-100 dark:border-gray-700 text-gray-400 text-xs uppercase">
+                        <th class="px-5 py-2 text-left font-medium">配置名称</th>
+                        <th class="px-5 py-2 text-right font-medium">输入 Token</th>
+                        <th class="px-5 py-2 text-right font-medium">输出 Token</th>
+                        <th class="px-5 py-2 text-right font-medium">总 Token</th>
+                        <th class="px-5 py-2 text-right font-medium">请求数</th>
+                        <th class="px-5 py-2 text-left font-medium">占比</th>
+                    </tr></thead>
+                    <tbody id="preset-tok-list"></tbody>
+                </table>
+            </div>
+            <div id="preset-tok-empty" class="px-5 py-8 text-center text-gray-400 text-sm hidden">暂无使用记录</div>
+        </div>
+
+        <!-- Time-Series Chart -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 mb-6">
+            <div class="px-5 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between flex-wrap gap-2">
+                <h2 class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">使用趋势</h2>
+                <div class="flex gap-1">
+                    <button onclick="setUsagePeriod('daily')" id="btn-period-daily" class="px-3 py-1 text-xs rounded-lg bg-primary-500 text-white">日</button>
+                    <button onclick="setUsagePeriod('weekly')" id="btn-period-weekly" class="px-3 py-1 text-xs rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300">周</button>
+                    <button onclick="setUsagePeriod('monthly')" id="btn-period-monthly" class="px-3 py-1 text-xs rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300">月</button>
+                </div>
+            </div>
+            <div class="p-4" style="height:320px;">
+                <canvas id="chart-timeseries"></canvas>
+            </div>
+        </div>
+
+        <!-- Hourly Curve -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+            <div class="px-5 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between flex-wrap gap-2">
+                <h2 class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">每日使用曲线</h2>
+                <input type="date" id="hourly-date" class="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-1 text-sm focus:ring-2 focus:ring-primary-500 focus:outline-none" onchange="loadTokenHourly()">
+            </div>
+            <div class="p-4" style="height:260px;">
+                <canvas id="chart-hourly"></canvas>
+            </div>
         </div>
     </div>
 
@@ -350,6 +422,7 @@ function switchTab(name) {
     });
     if (name === 'settings') { loadLogs(); loadSettingsData(); }
     if (name === 'presets') loadPresets();
+    if (name === 'usage') { loadTokenSummary(); loadTokenTimeseries(); loadTokenHourly(); }
     if (name === 'dashboard') { loadDashboard(); startDashboardPolling(); }
     else stopDashboardPolling();
 }
@@ -694,6 +767,121 @@ function copyProxyUrl() {
         () => toast('代理地址已复制', 'success'),
         () => toast('复制失败', 'error')
     );
+}
+
+// ── Token Usage ──
+
+let _usageChart = null;
+let _hourlyChart = null;
+let _usagePeriod = 'daily';
+
+function formatTok(n) {
+    if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + 'M';
+    if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
+    return String(n);
+}
+
+async function loadTokenSummary() {
+    const data = await api('/token/summary');
+    const t = data.totals || {};
+    document.getElementById('tok-total').textContent = formatTok(t.total_tokens || 0);
+    document.getElementById('tok-input').textContent = formatTok(t.input_tokens || 0);
+    document.getElementById('tok-output').textContent = formatTok(t.output_tokens || 0);
+    document.getElementById('tok-requests').textContent = t.request_count || 0;
+
+    const list = data.by_preset || [];
+    const tbody = document.getElementById('preset-tok-list');
+    const empty = document.getElementById('preset-tok-empty');
+    if (!list.length) { tbody.innerHTML = ''; empty.classList.remove('hidden'); return; }
+    empty.classList.add('hidden');
+    const grandTotal = list.reduce((s, p) => s + p.total_tokens, 0) || 1;
+    tbody.innerHTML = list.map(p => {
+        const pct = (p.total_tokens / grandTotal * 100).toFixed(1);
+        return `<tr class="border-b border-gray-50 dark:border-gray-700/50">
+            <td class="px-5 py-2 font-medium">${esc(p.preset_name)}</td>
+            <td class="px-5 py-2 text-right text-blue-600 dark:text-blue-400 font-mono text-xs">${formatTok(p.input_tokens)}</td>
+            <td class="px-5 py-2 text-right text-emerald-600 dark:text-emerald-400 font-mono text-xs">${formatTok(p.output_tokens)}</td>
+            <td class="px-5 py-2 text-right font-semibold font-mono text-xs">${formatTok(p.total_tokens)}</td>
+            <td class="px-5 py-2 text-right text-gray-500">${p.request_count}</td>
+            <td class="px-5 py-2"><div class="flex items-center gap-2"><div class="flex-1 h-2 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden"><div class="h-full bg-primary-500 rounded-full" style="width:${pct}%"></div></div><span class="text-xs text-gray-400">${pct}%</span></div></td>
+        </tr>`;
+    }).join('');
+}
+
+function setUsagePeriod(period) {
+    _usagePeriod = period;
+    ['daily','weekly','monthly'].forEach(p => {
+        const btn = document.getElementById('btn-period-' + p);
+        if (p === period) { btn.className = 'px-3 py-1 text-xs rounded-lg bg-primary-500 text-white'; }
+        else { btn.className = 'px-3 py-1 text-xs rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300'; }
+    });
+    loadTokenTimeseries();
+}
+
+async function loadTokenTimeseries() {
+    let data = await api('/token/timeseries?period=' + _usagePeriod + '&days=30');
+    const ctx = document.getElementById('chart-timeseries');
+    const isDark = document.documentElement.classList.contains('dark');
+    const gridColor = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
+    const textColor = isDark ? '#9ca3af' : '#6b7280';
+
+    const labels = data.map(d => d.date || d.week || d.month || '');
+    const inputData = data.map(d => d.input_tokens || 0);
+    const outputData = data.map(d => d.output_tokens || 0);
+
+    if (_usageChart) _usageChart.destroy();
+    _usageChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels,
+            datasets: [
+                { label: '输入 Token', data: inputData, backgroundColor: 'rgba(59,130,246,0.7)', borderRadius: 4 },
+                { label: '输出 Token', data: outputData, backgroundColor: 'rgba(16,185,129,0.7)', borderRadius: 4 },
+            ]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { labels: { color: textColor, boxWidth: 12, padding: 16 } } },
+            scales: {
+                x: { stacked: true, grid: { display: false }, ticks: { color: textColor, maxRotation: 45, font: { size: 10 } } },
+                y: { stacked: true, grid: { color: gridColor }, ticks: { color: textColor, callback: v => formatTok(v) } }
+            }
+        }
+    });
+}
+
+async function loadTokenHourly() {
+    const dateInput = document.getElementById('hourly-date');
+    const date = dateInput.value || undefined;
+    const params = date ? '?date=' + date : '';
+    const data = await api('/token/hourly' + params);
+    const ctx = document.getElementById('chart-hourly');
+    const isDark = document.documentElement.classList.contains('dark');
+    const gridColor = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
+    const textColor = isDark ? '#9ca3af' : '#6b7280';
+
+    if (_hourlyChart) _hourlyChart.destroy();
+    _hourlyChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: data.map(d => d.hour + ':00'),
+            datasets: [{
+                label: 'Token 用量',
+                data: data.map(d => d.total_tokens || 0),
+                borderColor: 'rgba(59,130,246,1)',
+                backgroundColor: 'rgba(59,130,246,0.15)',
+                fill: true, tension: 0.3, pointRadius: 2,
+            }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { labels: { color: textColor, boxWidth: 12, padding: 16 } } },
+            scales: {
+                x: { grid: { display: false }, ticks: { color: textColor, font: { size: 10 } } },
+                y: { grid: { color: gridColor }, ticks: { color: textColor, callback: v => formatTok(v) } }
+            }
+        }
+    });
 }
 
 // ── Version ──

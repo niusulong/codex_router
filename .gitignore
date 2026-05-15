@@ -1,6 +1,9 @@
-# Sensitive
+﻿# Sensitive
 config.yaml
 .env
+*.db
+*.db-shm
+*.db-wal
 
 # Python
 __pycache__/

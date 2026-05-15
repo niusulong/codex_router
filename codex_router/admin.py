@@ -286,4 +286,35 @@ def create_admin_router() -> APIRouter:
             "memory": mem_info,
         }
 
+    # ── Token Usage ──
+
+    @router.get("/api/token/summary", dependencies=[Depends(_local_only)])
+    async def get_token_summary(request: Request):
+        from codex_router.token_db import TokenDB
+        token_db: TokenDB | None = getattr(request.app.state, "token_db", None)
+        if token_db is None:
+            return {"totals": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "request_count": 0}, "by_preset": []}
+        return {"totals": token_db.get_total(), "by_preset": token_db.get_by_preset()}
+
+    @router.get("/api/token/timeseries", dependencies=[Depends(_local_only)])
+    async def get_token_timeseries(request: Request, period: str = "daily", days: int = 30):
+        from codex_router.token_db import TokenDB
+        token_db: TokenDB | None = getattr(request.app.state, "token_db", None)
+        if token_db is None:
+            return []
+        if period == "weekly":
+            return token_db.get_weekly(weeks=days)
+        elif period == "monthly":
+            return token_db.get_monthly(months=days)
+        else:
+            return token_db.get_daily(days=days)
+
+    @router.get("/api/token/hourly", dependencies=[Depends(_local_only)])
+    async def get_token_hourly(request: Request, date: str | None = None):
+        from codex_router.token_db import TokenDB
+        token_db: TokenDB | None = getattr(request.app.state, "token_db", None)
+        if token_db is None:
+            return []
+        return token_db.get_hourly_curve(date)
+
     return router

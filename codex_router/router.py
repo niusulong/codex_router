@@ -73,23 +73,29 @@ def create_router() -> APIRouter:
             upstream_url = build_upstream_url(config)
         client: Any = request.app.state.http_client
         timeout = config.upstream.timeout
+        preset_name = request.app.state.config_manager.active_preset_name or "default"
 
         t0 = _time.monotonic()
         try:
             if resp_req.stream:
-                return await _handle_streaming(client, upstream_url, headers, cc_req, resp_req.model, timeout, is_anthropic, store, input_items, stats, t0)
+                return await _handle_streaming(client, upstream_url, headers, cc_req, resp_req.model, timeout, is_anthropic, store, input_items, stats, t0, preset_name)
             else:
                 result = await _handle_non_streaming(client, upstream_url, headers, cc_req, resp_req.model, timeout, is_anthropic, store, input_items)
                 if stats:
-                    stats.record(model, 200, (_time.monotonic() - t0) * 1000, "http")
+                    usage = result.get("usage", {})
+                    stats.record(model, 200, (_time.monotonic() - t0) * 1000, "http",
+                                 input_tokens=usage.get("input_tokens", 0),
+                                 output_tokens=usage.get("output_tokens", 0),
+                                 total_tokens=usage.get("total_tokens", 0),
+                                 preset_name=preset_name)
                 return result
         except UpstreamError as exc:
             if stats:
-                stats.record(model, 502, (_time.monotonic() - t0) * 1000, "http", str(exc))
+                stats.record(model, 502, (_time.monotonic() - t0) * 1000, "http", str(exc), preset_name=preset_name)
             raise
         except HTTPException as exc:
             if stats:
-                stats.record(model, exc.status_code, (_time.monotonic() - t0) * 1000, "http", exc.detail)
+                stats.record(model, exc.status_code, (_time.monotonic() - t0) * 1000, "http", exc.detail, preset_name=preset_name)
             raise
 
     @router.websocket("/v1/responses")
@@ -142,11 +148,13 @@ async def _handle_streaming(
     input_items: list | str | None = None,
     stats: Any = None,
     t0: float = 0,
+    preset_name: str = "default",
 ) -> StreamingResponse:
     async def event_generator() -> AsyncGenerator[str, None]:
         response_id = None
         output: list[dict[str, Any]] = []
         stream_status = 200
+        completed_usage: dict[str, int] = {}
 
         async with client.stream("POST", upstream_url, json=cc_req, headers=headers, timeout=timeout) as resp:
             if resp.status_code != 200:
@@ -178,13 +186,18 @@ async def _handle_streaming(
                                     resp_data = data.get("response", {})
                                     response_id = resp_data.get("id")
                                     output = resp_data.get("output", [])
+                                    completed_usage = resp_data.get("usage", {})
                                 except (json.JSONDecodeError, KeyError):
                                     pass
 
         if stats:
             latency = (_time.monotonic() - t0) * 1000
             error_msg = None if stream_status == 200 else f"Upstream {stream_status}"
-            stats.record(model, stream_status, latency, "http", error_msg)
+            stats.record(model, stream_status, latency, "http", error_msg,
+                         input_tokens=completed_usage.get("input_tokens", 0),
+                         output_tokens=completed_usage.get("output_tokens", 0),
+                         total_tokens=completed_usage.get("total_tokens", 0),
+                         preset_name=preset_name)
         if store is not None and response_id and input_items is not None:
             store.store(response_id, input_items, output)
 

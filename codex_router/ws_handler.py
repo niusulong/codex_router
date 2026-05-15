@@ -104,6 +104,7 @@ async def _handle_response_create(ws: WebSocket, event: dict[str, Any], config: 
 
     stats = getattr(ws.app.state, "request_stats", None)
     t0 = _time.monotonic()
+    preset_name = ws.app.state.config_manager.active_preset_name or "default"
 
     is_anthropic = config.upstream.api_format == "anthropic"
     if is_anthropic:
@@ -138,7 +139,7 @@ async def _handle_response_create(ws: WebSocket, event: dict[str, Any], config: 
                     },
                 })
                 if stats:
-                    stats.record(model, resp.status_code, (_time.monotonic() - t0) * 1000, "websocket", f"Upstream {resp.status_code}")
+                    stats.record(model, resp.status_code, (_time.monotonic() - t0) * 1000, "websocket", f"Upstream {resp.status_code}", preset_name=preset_name)
                 return
 
             if is_anthropic:
@@ -149,21 +150,27 @@ async def _handle_response_create(ws: WebSocket, event: dict[str, Any], config: 
 
             response_id = None
             output: list[dict[str, Any]] = []
+            completed_usage: dict[str, int] = {}
             async for event_type, data in stream_events:
                 await ws.send_json(data)
                 if event_type == "response.completed":
                     resp_data = data.get("response", {})
                     response_id = resp_data.get("id")
                     output = resp_data.get("output", [])
+                    completed_usage = resp_data.get("usage", {})
 
         if response_id:
             store.store(response_id, input_items, output)
         if stats:
-            stats.record(model, 200, (_time.monotonic() - t0) * 1000, "websocket")
+            stats.record(model, 200, (_time.monotonic() - t0) * 1000, "websocket",
+                         input_tokens=completed_usage.get("input_tokens", 0),
+                         output_tokens=completed_usage.get("output_tokens", 0),
+                         total_tokens=completed_usage.get("total_tokens", 0),
+                         preset_name=preset_name)
     except Exception as exc:
         logger.exception("Upstream request failed in WebSocket")
         if stats:
-            stats.record(model, 502, (_time.monotonic() - t0) * 1000, "websocket", str(exc))
+            stats.record(model, 502, (_time.monotonic() - t0) * 1000, "websocket", str(exc), preset_name=preset_name)
         try:
             await ws.send_json({
                 "type": "response.failed",
