@@ -5,9 +5,17 @@ from __future__ import annotations
 import json
 import logging
 import time
-import uuid
 from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator
+
+from codex_router.converters.common import (
+    FUNCTION_CALL_ID_PREFIX,
+    MESSAGE_ID_PREFIX,
+    RESPONSE_ID_PREFIX,
+    STATUS_MAP,
+    convert_usage,
+    gen_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -53,8 +61,20 @@ async def convert_stream(
     model: str,
 ) -> AsyncGenerator[str, None]:
     """Consume Chat Completions SSE lines, yield Responses API SSE event strings."""
+    async for event_type, data in convert_stream_events(upstream_lines, model):
+        yield sse_event(event_type, data)
+
+
+async def convert_stream_events(
+    upstream_lines: AsyncGenerator[str, None],
+    model: str,
+) -> AsyncGenerator[tuple[str, dict[str, Any]], None]:
+    """Consume Chat Completions SSE lines, yield (event_type, data_dict) tuples.
+
+    Used by WebSocket handler to avoid SSE serialize→deserialize→reserialize overhead.
+    """
     state = StreamState(
-        response_id="resp_" + uuid.uuid4().hex[:24],
+        response_id=gen_id(RESPONSE_ID_PREFIX),
         model=model,
         created_at=int(time.time()),
     )
@@ -66,8 +86,8 @@ async def convert_stream(
 
         if stripped == "data: [DONE]":
             if not state.finalized:
-                async for event in _finalize(state, "stop"):
-                    yield event
+                async for event_type, data in _finalize_events(state, "stop"):
+                    yield event_type, data
             return
 
         if not stripped.startswith("data: "):
@@ -78,31 +98,31 @@ async def convert_stream(
         except json.JSONDecodeError:
             continue
 
-        async for event in _process_chunk(chunk, state):
-            yield event
+        async for event_type, data in _process_chunk_events(chunk, state):
+            yield event_type, data
 
 
-async def _process_chunk(
+async def _process_chunk_events(
     chunk: dict[str, Any], state: StreamState
-) -> AsyncGenerator[str, None]:
-    """Process a single Chat Completions streaming chunk."""
+) -> AsyncGenerator[tuple[str, dict[str, Any]], None]:
+    """Process a single Chat Completions streaming chunk, yielding (event_type, data) tuples."""
     # Emit initial events on first real chunk
     if not state.initialized:
         state.initialized = True
-        yield sse_event("response.created", {
+        yield "response.created", {
             "type": "response.created",
             "response": _skeleton_response(state),
-        })
-        yield sse_event("response.in_progress", {
+        }
+        yield "response.in_progress", {
             "type": "response.in_progress",
             "response": _skeleton_response(state),
-        })
+        }
 
     choices = chunk.get("choices", [])
     if not choices:
         # Usage-only chunk at end of stream
         if chunk.get("usage"):
-            state.usage = _convert_usage(chunk["usage"])
+            state.usage = convert_usage(chunk["usage"])
         return
 
     choice = choices[0]
@@ -114,10 +134,10 @@ async def _process_chunk(
     if content_delta is not None:
         if not state.message_open:
             state.message_open = True
-            state.message_id = "msg_" + uuid.uuid4().hex[:24]
+            state.message_id = gen_id(MESSAGE_ID_PREFIX)
             state.content_part_index = 0
 
-            yield sse_event("response.output_item.added", {
+            yield "response.output_item.added", {
                 "type": "response.output_item.added",
                 "output_index": state.output_item_index,
                 "item": {
@@ -127,21 +147,21 @@ async def _process_chunk(
                     "content": [],
                     "status": "in_progress",
                 },
-            })
+            }
             state.content_part_open = True
-            yield sse_event("response.content_part.added", {
+            yield "response.content_part.added", {
                 "type": "response.content_part.added",
                 "output_index": state.output_item_index,
                 "content_index": state.content_part_index,
                 "part": {"type": "output_text", "text": "", "annotations": []},
-            })
+            }
 
-        yield sse_event("response.output_text.delta", {
+        yield "response.output_text.delta", {
             "type": "response.output_text.delta",
             "output_index": state.output_item_index,
             "content_index": state.content_part_index,
             "delta": content_delta,
-        })
+        }
         state.accumulated_text += content_delta
 
     # --- Tool calls delta ---
@@ -149,8 +169,8 @@ async def _process_chunk(
     if tool_calls_delta is not None:
         # Close any open message item first
         if state.message_open:
-            async for event in _close_message(state):
-                yield event
+            async for event_type, data in _close_message_events(state):
+                yield event_type, data
 
         for tc_delta in tool_calls_delta:
             tc_index = tc_delta.get("index", 0)
@@ -162,14 +182,14 @@ async def _process_chunk(
             # New tool call starting
             if tc_delta.get("id"):
                 state.tool_calls[tc_index]["id"] = tc_delta["id"]
-                fc_id = "fc_" + uuid.uuid4().hex[:24]
+                fc_id = gen_id(FUNCTION_CALL_ID_PREFIX)
                 state.tool_calls[tc_index]["_fc_id"] = fc_id
                 state.tool_calls[tc_index]["_output_index"] = state.output_item_index
 
                 fn_name = tc_delta.get("function", {}).get("name", "")
                 state.tool_calls[tc_index]["name"] = fn_name
 
-                yield sse_event("response.output_item.added", {
+                yield "response.output_item.added", {
                     "type": "response.output_item.added",
                     "output_index": state.output_item_index,
                     "item": {
@@ -180,7 +200,7 @@ async def _process_chunk(
                         "arguments": "",
                         "status": "in_progress",
                     },
-                })
+                }
 
             # Function name (may arrive separately from id in some providers)
             fn_name = tc_delta.get("function", {}).get("name")
@@ -191,12 +211,12 @@ async def _process_chunk(
             fn_args_delta = tc_delta.get("function", {}).get("arguments")
             if fn_args_delta:
                 state.tool_calls[tc_index]["arguments"] += fn_args_delta
-                yield sse_event("response.function_call_arguments.delta", {
+                yield "response.function_call_arguments.delta", {
                     "type": "response.function_call_arguments.delta",
                     "output_index": state.tool_calls[tc_index]["_output_index"],
                     "item_id": state.tool_calls[tc_index]["_fc_id"],
                     "delta": fn_args_delta,
-                })
+                }
 
             # Increment output_item_index only when a new tool call starts
             if tc_delta.get("id"):
@@ -206,27 +226,27 @@ async def _process_chunk(
     if finish_reason is not None:
         # Capture usage from the final chunk if present
         if chunk.get("usage"):
-            state.usage = _convert_usage(chunk["usage"])
+            state.usage = convert_usage(chunk["usage"])
 
-        async for event in _finalize(state, finish_reason):
-            yield event
+        async for event_type, data in _finalize_events(state, finish_reason):
+            yield event_type, data
 
 
-async def _close_message(state: StreamState) -> AsyncGenerator[str, None]:
-    """Close the currently open message output item."""
+async def _close_message_events(state: StreamState) -> AsyncGenerator[tuple[str, dict[str, Any]], None]:
+    """Close the currently open message output item, yielding (event_type, data) tuples."""
     if state.content_part_open:
-        yield sse_event("response.output_text.done", {
+        yield "response.output_text.done", {
             "type": "response.output_text.done",
             "output_index": state.output_item_index,
             "content_index": state.content_part_index,
             "text": state.accumulated_text,
-        })
-        yield sse_event("response.content_part.done", {
+        }
+        yield "response.content_part.done", {
             "type": "response.content_part.done",
             "output_index": state.output_item_index,
             "content_index": state.content_part_index,
             "part": {"type": "output_text", "text": state.accumulated_text, "annotations": []},
-        })
+        }
         state.content_part_open = False
 
     if state.message_open:
@@ -237,25 +257,25 @@ async def _close_message(state: StreamState) -> AsyncGenerator[str, None]:
             "content": [{"type": "output_text", "text": state.accumulated_text, "annotations": []}],
             "status": "completed",
         }
-        yield sse_event("response.output_item.done", {
+        yield "response.output_item.done", {
             "type": "response.output_item.done",
             "output_index": state.output_item_index,
             "item": msg_item,
-        })
+        }
         state.output.append(msg_item)
         state.message_open = False
         state.output_item_index += 1
         state.accumulated_text = ""
 
 
-async def _finalize(
+async def _finalize_events(
     state: StreamState, finish_reason: str
-) -> AsyncGenerator[str, None]:
-    """Emit closing events and response.completed."""
+) -> AsyncGenerator[tuple[str, dict[str, Any]], None]:
+    """Emit closing events and response.completed, yielding (event_type, data) tuples."""
     # Close any open message
     if state.message_open:
-        async for event in _close_message(state):
-            yield event
+        async for event_type, data in _close_message_events(state):
+            yield event_type, data
 
     # Close tool call items
     for tc in state.tool_calls:
@@ -264,12 +284,12 @@ async def _finalize(
 
         out_idx = tc["_output_index"]
 
-        yield sse_event("response.function_call_arguments.done", {
+        yield "response.function_call_arguments.done", {
             "type": "response.function_call_arguments.done",
             "output_index": out_idx,
             "item_id": tc["_fc_id"],
             "arguments": tc["arguments"],
-        })
+        }
 
         fc_item = {
             "type": "function_call",
@@ -279,21 +299,15 @@ async def _finalize(
             "arguments": tc["arguments"],
             "status": "completed",
         }
-        yield sse_event("response.output_item.done", {
+        yield "response.output_item.done", {
             "type": "response.output_item.done",
             "output_index": out_idx,
             "item": fc_item,
-        })
+        }
         state.output.append(fc_item)
 
     # Determine final status
-    status_map = {
-        "stop": "completed",
-        "length": "incomplete",
-        "tool_calls": "completed",
-        "content_filter": "incomplete",
-    }
-    status = status_map.get(finish_reason, "completed")
+    status = STATUS_MAP.get(finish_reason, "completed")
     state.finalized = True
 
     full_response: dict[str, Any] = {
@@ -310,22 +324,9 @@ async def _finalize(
     if finish_reason == "length":
         full_response["incomplete_details"] = {"reason": "max_output_tokens"}
 
-    yield sse_event("response.completed", {
+    yield "response.completed", {
         "type": "response.completed",
         "response": full_response,
-    })
-
-
-def _convert_usage(usage: dict[str, Any]) -> dict[str, Any]:
-    result: dict[str, Any] = {
-        "input_tokens": usage.get("prompt_tokens", 0),
-        "output_tokens": usage.get("completion_tokens", 0),
-        "total_tokens": usage.get("total_tokens", 0),
     }
-    details_in = usage.get("prompt_tokens_details")
-    details_out = usage.get("completion_tokens_details")
-    if details_in:
-        result["input_tokens_details"] = {"cached_tokens": details_in.get("cached_tokens", 0)}
-    if details_out:
-        result["output_tokens_details"] = {"reasoning_tokens": details_out.get("reasoning_tokens", 0)}
-    return result
+
+

@@ -1,40 +1,36 @@
+"""Pydantic models for Responses API request parsing."""
+
 from __future__ import annotations
 
-from typing import Any, Literal, Optional, Union
+from typing import Any, Literal, Union
 
 from pydantic import BaseModel, Field
 
-
-# --- Content parts within a message's content array ---
+# Type aliases
+InputContentPart = Union["InputTextContent", "InputImageContent"]
 
 
 class InputTextContent(BaseModel):
-    type: Literal["input_text"] = "input_text"
+    type: Literal["input_text", "output_text"] = "input_text"
     text: str
+    annotations: list[Any] | None = None
 
 
 class InputImageContent(BaseModel):
     type: Literal["input_image"] = "input_image"
-    image_url: Optional[str] = None
-    file_id: Optional[str] = None
-    detail: Optional[str] = None
-
-
-InputContentPart = Union[InputTextContent, InputImageContent]
-
-
-# --- Items within the input array ---
+    image_url: str | None = None
+    file_id: str | None = None
+    detail: str | None = None
 
 
 class InputMessageItem(BaseModel):
     type: Literal["message"] = "message"
-    role: Literal["user", "assistant", "system", "developer"]
-    content: Union[str, list[InputContentPart]]
+    role: str
+    content: str | list[InputContentPart]
 
 
 class InputFunctionCallItem(BaseModel):
     type: Literal["function_call"] = "function_call"
-    id: Optional[str] = None
     call_id: str
     name: str
     arguments: str
@@ -46,57 +42,25 @@ class InputFunctionCallOutputItem(BaseModel):
     output: str
 
 
-InputItem = Union[
-    InputFunctionCallItem,
-    InputFunctionCallOutputItem,
-    InputMessageItem,
-]
-
-
-# --- Tools ---
-
-
-class FunctionToolParam(BaseModel):
-    type: Literal["function"] = "function"
-    name: str
-    description: Optional[str] = None
-    parameters: Optional[dict[str, Any]] = None
-    strict: Optional[bool] = None
-
-
-# --- Tool choice ---
-
-
-class FunctionToolChoice(BaseModel):
-    type: Literal["function"] = "function"
-    name: str
-
-
-ToolChoice = Union[Literal["auto", "none", "required"], FunctionToolChoice, str]
-
-
-# --- Text format ---
+InputItem = Union[InputMessageItem, InputFunctionCallItem, InputFunctionCallOutputItem]
 
 
 class TextFormat(BaseModel):
     type: str
-    json_schema: Optional[dict[str, Any]] = None
-
-
-# --- Top-level Responses API request ---
+    json_schema: dict[str, Any] | None = None
 
 
 class ResponsesRequest(BaseModel):
     model: str
-    input: Union[str, list[InputItem]]
-    instructions: Optional[str] = None
-    tools: Optional[list[Any]] = None
-    tool_choice: Optional[ToolChoice] = None
-    max_output_tokens: Optional[int] = None
-    temperature: Optional[float] = None
-    top_p: Optional[float] = None
-    stream: Optional[bool] = None
-    text: Optional[TextFormat] = None
-    previous_response_id: Optional[str] = None
+    input: str | list[InputItem]
+    instructions: str | None = None
+    tools: list[dict[str, Any]] | None = None
+    tool_choice: str | dict[str, Any] | None = None
+    max_output_tokens: int | None = Field(default=None, gt=0)
+    temperature: float | None = Field(default=None, ge=0, le=2)
+    top_p: float | None = Field(default=None, ge=0, le=1)
+    stream: bool | None = None
+    text: TextFormat | dict[str, Any] | None = None
+    previous_response_id: str | None = None
 
     model_config = {"extra": "allow"}

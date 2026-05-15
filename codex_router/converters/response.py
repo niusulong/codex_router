@@ -3,13 +3,22 @@
 from __future__ import annotations
 
 import time
-import uuid
 from typing import Any
+
+from codex_router.converters.common import (
+    CALL_ID_PREFIX,
+    FUNCTION_CALL_ID_PREFIX,
+    MESSAGE_ID_PREFIX,
+    RESPONSE_ID_PREFIX,
+    STATUS_MAP,
+    convert_usage,
+    gen_id,
+)
 
 
 def convert_response(cc_resp: dict[str, Any], model: str) -> dict[str, Any]:
     """Convert a Chat Completions response dict to a Responses API response dict."""
-    resp_id = "resp_" + uuid.uuid4().hex[:24]
+    resp_id = gen_id(RESPONSE_ID_PREFIX)
     created_ts = int(time.time())
 
     choice = cc_resp.get("choices", [{}])[0] if cc_resp.get("choices") else {}
@@ -23,7 +32,7 @@ def convert_response(cc_resp: dict[str, Any], model: str) -> dict[str, Any]:
     if content:
         output.append({
             "type": "message",
-            "id": "msg_" + uuid.uuid4().hex[:24],
+            "id": gen_id(MESSAGE_ID_PREFIX),
             "role": "assistant",
             "content": [{"type": "output_text", "text": content, "annotations": []}],
             "status": "completed",
@@ -33,10 +42,10 @@ def convert_response(cc_resp: dict[str, Any], model: str) -> dict[str, Any]:
     tool_calls = message.get("tool_calls")
     if tool_calls:
         for tc in tool_calls:
-            tc_id = tc.get("id", "call_" + uuid.uuid4().hex[:24])
+            tc_id = tc.get("id", gen_id(CALL_ID_PREFIX))
             output.append({
                 "type": "function_call",
-                "id": "fc_" + uuid.uuid4().hex[:24],
+                "id": gen_id(FUNCTION_CALL_ID_PREFIX),
                 "call_id": tc_id,
                 "name": tc.get("function", {}).get("name", ""),
                 "arguments": tc.get("function", {}).get("arguments", ""),
@@ -44,29 +53,11 @@ def convert_response(cc_resp: dict[str, Any], model: str) -> dict[str, Any]:
             })
 
     # Status mapping
-    status_map = {
-        "stop": "completed",
-        "length": "incomplete",
-        "tool_calls": "completed",
-        "content_filter": "incomplete",
-    }
-    status = status_map.get(finish_reason, "completed")
+    status = STATUS_MAP.get(finish_reason, "completed")
 
     # Usage mapping
     usage = cc_resp.get("usage", {})
-    resp_usage: dict[str, Any] = {}
-    if usage:
-        resp_usage = {
-            "input_tokens": usage.get("prompt_tokens", 0),
-            "output_tokens": usage.get("completion_tokens", 0),
-            "total_tokens": usage.get("total_tokens", 0),
-        }
-        details_in = usage.get("prompt_tokens_details")
-        details_out = usage.get("completion_tokens_details")
-        if details_in:
-            resp_usage["input_tokens_details"] = {"cached_tokens": details_in.get("cached_tokens", 0)}
-        if details_out:
-            resp_usage["output_tokens_details"] = {"reasoning_tokens": details_out.get("reasoning_tokens", 0)}
+    resp_usage = convert_usage(usage) if usage else {}
 
     result: dict[str, Any] = {
         "id": resp_id,

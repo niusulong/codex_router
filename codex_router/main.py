@@ -3,6 +3,8 @@
 import atexit
 import logging
 import signal
+import threading
+import webbrowser
 
 import httpx
 import uvicorn
@@ -99,6 +101,15 @@ def main():
         atexit.register(_restore_on_exit)
         signal.signal(signal.SIGTERM, _signal_handler)
         signal.signal(signal.SIGINT, _signal_handler)
+
+    # Open admin UI in browser after a short delay
+    admin_url = f"http://{config.server.host}:{config.server.port}/admin/"
+
+    def _open_browser():
+        threading.Event().wait(1.5)
+        webbrowser.open(admin_url)
+
+    threading.Thread(target=_open_browser, daemon=True).start()
 
     uvicorn.run(
         "codex_router.main:create_app",

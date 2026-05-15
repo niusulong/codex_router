@@ -71,13 +71,18 @@ def _convert_input(
             msg = _convert_message_item(item)
             messages.append(msg)
         elif isinstance(item, InputFunctionCallItem):
-            _flush_pending_tool_calls(messages)
             tc = {
                 "id": item.call_id,
                 "type": "function",
                 "function": {"name": item.name, "arguments": item.arguments},
             }
-            messages.append({"role": "assistant", "tool_calls": [tc]})
+            if messages and messages[-1].get("role") == "assistant":
+                prev = messages[-1]
+                if "tool_calls" not in prev:
+                    prev["tool_calls"] = []
+                prev["tool_calls"].append(tc)
+            else:
+                messages.append({"role": "assistant", "tool_calls": [tc]})
         elif isinstance(item, InputFunctionCallOutputItem):
             messages.append({
                 "role": "tool",
@@ -113,21 +118,6 @@ def _convert_message_item(item: InputMessageItem) -> dict[str, Any]:
             logger.warning("Unknown content part type: %s", type(part).__name__)
 
     return {"role": role, "content": parts}
-
-
-def _flush_pending_tool_calls(messages: list[dict[str, Any]]) -> None:
-    """Merge consecutive assistant messages with tool_calls into one."""
-    if len(messages) >= 2:
-        prev = messages[-1]
-        prev2 = messages[-2]
-        if (
-            prev.get("role") == "assistant"
-            and "tool_calls" in prev
-            and prev2.get("role") == "assistant"
-            and "tool_calls" in prev2
-        ):
-            prev2["tool_calls"].extend(prev["tool_calls"])
-            messages.pop()
 
 
 def _convert_tools(tools: list[Any], config: ProxyConfig) -> list[dict[str, Any]]:

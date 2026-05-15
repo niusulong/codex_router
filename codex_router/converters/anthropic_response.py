@@ -6,6 +6,8 @@ import time
 from typing import Any
 
 from codex_router.converters.common import (
+    CALL_ID_PREFIX,
+    FUNCTION_CALL_ID_PREFIX,
     MESSAGE_ID_PREFIX,
     RESPONSE_ID_PREFIX,
     gen_id,
@@ -17,15 +19,28 @@ def convert_anthropic_response(data: dict[str, Any], model: str) -> dict[str, An
     resp_id = gen_id(RESPONSE_ID_PREFIX)
     created_ts = int(time.time())
 
-    # Extract text from content blocks
     text = ""
-    for block in data.get("content", []):
-        if block.get("type") == "text":
-            text += block.get("text", "")
-
     output: list[dict[str, Any]] = []
+
+    for block in data.get("content", []):
+        block_type = block.get("type", "")
+
+        if block_type == "text":
+            block_text = block.get("text", "")
+            text += block_text
+
+        elif block_type == "tool_use":
+            output.append({
+                "type": "function_call",
+                "id": gen_id(FUNCTION_CALL_ID_PREFIX),
+                "call_id": block.get("id", gen_id(CALL_ID_PREFIX)),
+                "name": block.get("name", ""),
+                "arguments": _serialize_input(block.get("input", {})),
+                "status": "completed",
+            })
+
     if text:
-        output.append({
+        output.insert(0, {
             "type": "message",
             "id": gen_id(MESSAGE_ID_PREFIX),
             "role": "assistant",
@@ -58,3 +73,14 @@ def convert_anthropic_response(data: dict[str, Any], model: str) -> dict[str, An
         result["incomplete_details"] = {"reason": "max_output_tokens"}
 
     return result
+
+
+def _serialize_input(data: Any) -> str:
+    """Serialize Anthropic tool input to a JSON string for Responses API arguments."""
+    if isinstance(data, str):
+        return data
+    import json
+    try:
+        return json.dumps(data, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return "{}"

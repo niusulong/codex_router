@@ -1,5 +1,4 @@
-"""Allow running as python -m codex_router."""
-
 from codex_router.main import main
 
-main()
+if __name__ == "__main__":
+    main()
