@@ -15,7 +15,7 @@
 ## 安装
 
 ```bash
-pip install codex-router
+pip install codex-router-proxy-proxy
 ```
 
 从源码安装（开发模式）：
@@ -66,13 +66,13 @@ python -m codex_router
 或使用安装后的命令：
 
 ```bash
-codex-router
+codex-router-proxy
 ```
 
 查看版本：
 
 ```bash
-codex-router --version
+codex-router-proxy --version
 ```
 
 代理默认监听 `http://127.0.0.1:8080`。启动时会自动配置 Codex CLI（修改 `~/.codex/auth.json` 和 `~/.codex/config.toml`），退出时自动恢复原始配置。启动后自动打开管理面板页面。
