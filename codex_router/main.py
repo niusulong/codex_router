@@ -99,9 +99,12 @@ def main():
 
     parser = argparse.ArgumentParser(description="Codex Router")
     parser.add_argument("--version", action="version", version=f"codex-router {__version__}")
-    parser.parse_args()
+    parser.add_argument("port", nargs="?", type=int, help="Port to listen on (overrides config)")
+    args = parser.parse_args()
 
     config, config_path = load_config()
+    if args.port is not None:
+        config.server.port = args.port
     _config = config
     _config_path = config_path
 

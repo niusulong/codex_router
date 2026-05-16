@@ -1,4 +1,4 @@
-﻿[project]
+[project]
 name = "codex-router"
 dynamic = ["version"]
 description = "Proxy server converting OpenAI Responses API to Chat Completions API"
@@ -15,6 +15,7 @@ dependencies = [
 
 [project.scripts]
 codex-router = "codex_router.main:main"
+codex_router = "codex_router.main:main"
 
 [build-system]
 requires = ["hatchling"]

@@ -84,6 +84,8 @@ async def convert_stream_events(
         if not stripped:
             continue
 
+        logger.debug("SSE raw line: %s", stripped[:300])
+
         if stripped == "data: [DONE]":
             if not state.finalized:
                 async for event_type, data in _finalize_events(state, "stop"):
@@ -96,6 +98,7 @@ async def convert_stream_events(
         try:
             chunk = json.loads(stripped[6:])
         except json.JSONDecodeError:
+            logger.warning("SSE JSON 解析失败: %s", stripped[:200])
             continue
 
         async for event_type, data in _process_chunk_events(chunk, state):
@@ -328,5 +331,3 @@ async def _finalize_events(
         "type": "response.completed",
         "response": full_response,
     }
-
-
