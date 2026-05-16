@@ -4,7 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Codex Router 管理面板</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/admin/static/tailwind.js"></script>
+    <script>
+    if (typeof tailwind === 'undefined') {
+        document.documentElement.classList.add('tw-fallback');
+    }
+    </script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
     <script>
     tailwind.config = {
@@ -22,6 +27,7 @@
     }
     </script>
     <style>
+        .hidden { display: none !important; }
         @keyframes pulse-ring { 0% { box-shadow: 0 0 0 0 rgba(34,197,94,0.4); } 70% { box-shadow: 0 0 0 6px rgba(34,197,94,0); } 100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); } }
         .pulse-ring { animation: pulse-ring 2s infinite; }
         @keyframes fade-in { from { opacity:0; transform:scale(0.95) } to { opacity:1; transform:scale(1) } }
@@ -163,23 +169,14 @@
 
     <!-- Usage Tab -->
     <div id="tab-usage" class="tab-content hidden">
-        <!-- Summary Cards -->
-        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-            <div class="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
-                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">总 Token</div>
-                <div id="tok-total" class="text-xl font-bold text-primary-600 dark:text-primary-400">0</div>
-            </div>
-            <div class="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
-                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">输入 Token</div>
-                <div id="tok-input" class="text-xl font-bold text-blue-600 dark:text-blue-400">0</div>
-            </div>
-            <div class="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
-                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">输出 Token</div>
-                <div id="tok-output" class="text-xl font-bold text-emerald-600 dark:text-emerald-400">0</div>
-            </div>
-            <div class="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
-                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">请求数</div>
-                <div id="tok-requests" class="text-xl font-bold">0</div>
+        <!-- Token Summary Cards -->
+        <div id="token-cards" class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            <div class="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700 flex items-center gap-3">
+                <span class="w-3 h-3 rounded-full bg-blue-500 shrink-0"></span>
+                <div>
+                    <div class="text-xs text-gray-500 dark:text-gray-400">Token 消耗总量</div>
+                    <div id="tok-total" class="text-xl font-bold">0</div>
+                </div>
             </div>
         </div>
 
@@ -208,10 +205,13 @@
         <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 mb-6">
             <div class="px-5 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between flex-wrap gap-2">
                 <h2 class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">使用趋势</h2>
-                <div class="flex gap-1">
-                    <button onclick="setUsagePeriod('daily')" id="btn-period-daily" class="px-3 py-1 text-xs rounded-lg bg-primary-500 text-white">日</button>
-                    <button onclick="setUsagePeriod('weekly')" id="btn-period-weekly" class="px-3 py-1 text-xs rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300">周</button>
-                    <button onclick="setUsagePeriod('monthly')" id="btn-period-monthly" class="px-3 py-1 text-xs rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300">月</button>
+                <div class="flex items-center gap-3 flex-wrap">
+                    <span id="ts-summary" class="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400"></span>
+                    <div class="flex gap-1">
+                        <button onclick="setUsagePeriod('today')" id="btn-period-today" class="px-3 py-1 text-xs rounded-lg bg-primary-500 text-white">当日</button>
+                        <button onclick="setUsagePeriod('7d')" id="btn-period-7d" class="px-3 py-1 text-xs rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300">近7天</button>
+                        <button onclick="setUsagePeriod('30d')" id="btn-period-30d" class="px-3 py-1 text-xs rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300">近30天</button>
+                    </div>
                 </div>
             </div>
             <div class="p-4" style="height:320px;">
@@ -219,11 +219,14 @@
             </div>
         </div>
 
-        <!-- Hourly Curve -->
+        <!-- Specific Day Hourly Curve -->
         <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
             <div class="px-5 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between flex-wrap gap-2">
-                <h2 class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">每日使用曲线</h2>
-                <input type="date" id="hourly-date" class="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-1 text-sm focus:ring-2 focus:ring-primary-500 focus:outline-none" onchange="loadTokenHourly()">
+                <h2 class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">历史日曲线</h2>
+                <div class="flex items-center gap-2">
+                    <span id="day-summary" class="text-xs text-gray-500 dark:text-gray-400"></span>
+                    <input type="date" id="hourly-date" class="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-1 text-sm focus:ring-2 focus:ring-primary-500 focus:outline-none" onchange="loadTokenHourly()">
+                </div>
             </div>
             <div class="p-4" style="height:260px;">
                 <canvas id="chart-hourly"></canvas>
@@ -250,13 +253,6 @@
                         <button id="set-auto-configure" onclick="this.classList.toggle('bg-primary-500');this.classList.toggle('bg-gray-300');this.classList.toggle('dark:bg-gray-600')" class="relative w-11 h-6 rounded-full bg-gray-300 dark:bg-gray-600 transition-colors">
                             <span class="absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform"></span>
                         </button>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium mb-1.5">API 格式</label>
-                        <select id="set-api-format" class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:outline-none">
-                            <option value="openai">OpenAI (Chat Completions)</option>
-                            <option value="anthropic">Anthropic (Messages)</option>
-                        </select>
                     </div>
                     <div>
                         <label class="block text-sm font-medium mb-1.5">过滤工具</label>
@@ -660,7 +656,6 @@ async function loadSettingsData() {
     btn.classList.toggle('bg-gray-300', !isOn);
     btn.classList.toggle('dark:bg-gray-600', !isOn);
     btn.querySelector('span').style.transform = isOn ? 'translateX(20px)' : 'translateX(0)';
-    document.getElementById('set-api-format').value = config.upstream.api_format || 'openai';
     _tools = config.ignored_builtin_tools || [];
     renderTools();
 }
@@ -689,7 +684,6 @@ async function saveSettings() {
         timeout: parseFloat(document.getElementById('set-timeout').value),
         auto_configure: btn.classList.contains('bg-primary-500'),
         ignored_builtin_tools: _tools,
-        api_format: document.getElementById('set-api-format').value,
     };
     const res = await api('/settings', {
         method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)
@@ -773,7 +767,7 @@ function copyProxyUrl() {
 
 let _usageChart = null;
 let _hourlyChart = null;
-let _usagePeriod = 'daily';
+let _usagePeriod = 'today';
 
 function formatTok(n) {
     if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + 'M';
@@ -781,14 +775,36 @@ function formatTok(n) {
     return String(n);
 }
 
+const _modelColors = ['#f97316','#8b5cf6','#ec4899','#14b8a6','#eab308','#ef4444','#06b6d4','#84cc16'];
+
 async function loadTokenSummary() {
     const data = await api('/token/summary');
     const t = data.totals || {};
-    document.getElementById('tok-total').textContent = formatTok(t.total_tokens || 0);
-    document.getElementById('tok-input').textContent = formatTok(t.input_tokens || 0);
-    document.getElementById('tok-output').textContent = formatTok(t.output_tokens || 0);
-    document.getElementById('tok-requests').textContent = t.request_count || 0;
+    const byModel = data.by_model || [];
 
+    // Build summary cards: total + per-model
+    const cards = document.getElementById('token-cards');
+    let html = `<div class="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700 flex items-center gap-3">
+        <span class="w-3 h-3 rounded-full bg-blue-500 shrink-0"></span>
+        <div>
+            <div class="text-xs text-gray-500 dark:text-gray-400">Token 消耗总量</div>
+            <div class="text-xl font-bold">${formatTok(t.total_tokens || 0)}</div>
+        </div>
+    </div>`;
+
+    byModel.forEach((m, i) => {
+        const color = _modelColors[i % _modelColors.length];
+        html += `<div class="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700 flex items-center gap-3">
+            <span class="w-3 h-3 rounded-full shrink-0" style="background:${color}"></span>
+            <div>
+                <div class="text-xs text-gray-500 dark:text-gray-400">${esc(m.model)} 消耗</div>
+                <div class="text-xl font-bold" style="color:${color}">${formatTok(m.total_tokens)}</div>
+            </div>
+        </div>`;
+    });
+    cards.innerHTML = html;
+
+    // Per-preset table
     const list = data.by_preset || [];
     const tbody = document.getElementById('preset-tok-list');
     const empty = document.getElementById('preset-tok-empty');
@@ -810,7 +826,7 @@ async function loadTokenSummary() {
 
 function setUsagePeriod(period) {
     _usagePeriod = period;
-    ['daily','weekly','monthly'].forEach(p => {
+    ['today','7d','30d'].forEach(p => {
         const btn = document.getElementById('btn-period-' + p);
         if (p === period) { btn.className = 'px-3 py-1 text-xs rounded-lg bg-primary-500 text-white'; }
         else { btn.className = 'px-3 py-1 text-xs rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300'; }
@@ -819,32 +835,77 @@ function setUsagePeriod(period) {
 }
 
 async function loadTokenTimeseries() {
-    let data = await api('/token/timeseries?period=' + _usagePeriod + '&days=30');
     const ctx = document.getElementById('chart-timeseries');
     const isDark = document.documentElement.classList.contains('dark');
     const gridColor = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
     const textColor = isDark ? '#9ca3af' : '#6b7280';
+    let labels, inputData, outputData, totalInput, totalOutput;
 
-    const labels = data.map(d => d.date || d.week || d.month || '');
-    const inputData = data.map(d => d.input_tokens || 0);
-    const outputData = data.map(d => d.output_tokens || 0);
+    if (_usagePeriod === 'today') {
+        const data = await api('/token/hourly');
+        labels = data.map(d => d.hour + ':00');
+        inputData = null;
+        outputData = null;
+        totalInput = 0;
+        totalOutput = data.reduce((s, d) => s + d.total_tokens, 0);
+        const summaryHtml =
+            `<span class="font-semibold">${formatTok(totalOutput)} total</span>` +
+            `<span class="text-gray-400">${data.reduce((s,d)=>s+d.request_count,0)} 次请求</span>`;
+        document.getElementById('ts-summary').innerHTML = summaryHtml;
+
+        if (_usageChart) _usageChart.destroy();
+        _usageChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels,
+                datasets: [{
+                    label: 'Token 用量', data: data.map(d => d.total_tokens || 0),
+                    borderColor: 'rgba(249,115,22,1)', backgroundColor: 'rgba(249,115,22,0.12)',
+                    fill: true, tension: 0.4, pointRadius: 3, pointHoverRadius: 5,
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { grid: { display: false }, ticks: { color: textColor, font: { size: 10 } } },
+                    y: { grid: { color: gridColor }, ticks: { color: textColor, callback: v => formatTok(v) }, beginAtZero: true }
+                }
+            }
+        });
+        return;
+    }
+
+    const days = _usagePeriod === '7d' ? 7 : 30;
+    const data = await api('/token/timeseries?period=daily&days=' + days);
+    labels = data.map(d => d.date ? d.date.substring(5) : '');
+    inputData = data.map(d => d.input_tokens || 0);
+    outputData = data.map(d => d.output_tokens || 0);
+    totalInput = inputData.reduce((a, b) => a + b, 0);
+    totalOutput = outputData.reduce((a, b) => a + b, 0);
+    document.getElementById('ts-summary').innerHTML =
+        `<span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full inline-block" style="background:rgba(59,130,246,1)"></span>输入 ${formatTok(totalInput)}</span>` +
+        `<span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full inline-block" style="background:rgba(249,115,22,1)"></span>输出 ${formatTok(totalOutput)}</span>` +
+        `<span class="font-semibold">${formatTok(totalInput + totalOutput)} total</span>`;
 
     if (_usageChart) _usageChart.destroy();
     _usageChart = new Chart(ctx, {
-        type: 'bar',
+        type: 'line',
         data: {
             labels,
             datasets: [
-                { label: '输入 Token', data: inputData, backgroundColor: 'rgba(59,130,246,0.7)', borderRadius: 4 },
-                { label: '输出 Token', data: outputData, backgroundColor: 'rgba(16,185,129,0.7)', borderRadius: 4 },
+                { label: '输入 Token', data: inputData, borderColor: 'rgba(59,130,246,1)', backgroundColor: 'rgba(59,130,246,0.10)', fill: true, tension: 0.4, pointRadius: 3, pointHoverRadius: 5 },
+                { label: '输出 Token', data: outputData, borderColor: 'rgba(249,115,22,1)', backgroundColor: 'rgba(249,115,22,0.10)', fill: true, tension: 0.4, pointRadius: 3, pointHoverRadius: 5 },
             ]
         },
         options: {
             responsive: true, maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
             plugins: { legend: { labels: { color: textColor, boxWidth: 12, padding: 16 } } },
             scales: {
-                x: { stacked: true, grid: { display: false }, ticks: { color: textColor, maxRotation: 45, font: { size: 10 } } },
-                y: { stacked: true, grid: { color: gridColor }, ticks: { color: textColor, callback: v => formatTok(v) } }
+                x: { grid: { display: false }, ticks: { color: textColor, maxRotation: 45, font: { size: 10 } } },
+                y: { grid: { color: gridColor }, ticks: { color: textColor, callback: v => formatTok(v) }, beginAtZero: true }
             }
         }
     });
@@ -852,13 +913,20 @@ async function loadTokenTimeseries() {
 
 async function loadTokenHourly() {
     const dateInput = document.getElementById('hourly-date');
-    const date = dateInput.value || undefined;
-    const params = date ? '?date=' + date : '';
-    const data = await api('/token/hourly' + params);
+    if (!dateInput.value) {
+        const now = new Date();
+        dateInput.value = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0') + '-' + String(now.getDate()).padStart(2,'0');
+    }
+    const data = await api('/token/hourly?date=' + dateInput.value);
     const ctx = document.getElementById('chart-hourly');
     const isDark = document.documentElement.classList.contains('dark');
     const gridColor = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
     const textColor = isDark ? '#9ca3af' : '#6b7280';
+
+    const totalTokens = data.reduce((s, d) => s + d.total_tokens, 0);
+    const totalReqs = data.reduce((s, d) => s + d.request_count, 0);
+    document.getElementById('day-summary').innerHTML =
+        `<span class="font-semibold">${formatTok(totalTokens)}</span> <span class="text-gray-400">${totalReqs} 次</span>`;
 
     if (_hourlyChart) _hourlyChart.destroy();
     _hourlyChart = new Chart(ctx, {
@@ -868,17 +936,17 @@ async function loadTokenHourly() {
             datasets: [{
                 label: 'Token 用量',
                 data: data.map(d => d.total_tokens || 0),
-                borderColor: 'rgba(59,130,246,1)',
-                backgroundColor: 'rgba(59,130,246,0.15)',
-                fill: true, tension: 0.3, pointRadius: 2,
+                borderColor: 'rgba(249,115,22,1)',
+                backgroundColor: 'rgba(249,115,22,0.12)',
+                fill: true, tension: 0.4, pointRadius: 3, pointHoverRadius: 5,
             }]
         },
         options: {
             responsive: true, maintainAspectRatio: false,
-            plugins: { legend: { labels: { color: textColor, boxWidth: 12, padding: 16 } } },
+            plugins: { legend: { display: false } },
             scales: {
                 x: { grid: { display: false }, ticks: { color: textColor, font: { size: 10 } } },
-                y: { grid: { color: gridColor }, ticks: { color: textColor, callback: v => formatTok(v) } }
+                y: { grid: { color: gridColor }, ticks: { color: textColor, callback: v => formatTok(v) }, beginAtZero: true }
             }
         }
     });

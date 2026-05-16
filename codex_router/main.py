@@ -1,5 +1,6 @@
 ﻿"""Codex Router — local proxy converting Responses API to Chat Completions API."""
 
+import argparse
 import atexit
 import logging
 import signal
@@ -18,6 +19,7 @@ from codex_router.errors import register_error_handlers
 from codex_router.response_store import ResponseStore
 from codex_router.router import create_router
 from codex_router.stats import RequestStats
+from codex_router.version import __version__
 from codex_router.token_db import TokenDB
 
 logger = logging.getLogger(__name__)
@@ -37,7 +39,7 @@ def create_app(config: ProxyConfig | None = None, config_path=None) -> FastAPI:
         _config, _config_path = load_config()
     config = _config
 
-    app = FastAPI(title="Codex Router", lifespan=_lifespan, websocket_max_size=10 * 1024 * 1024)
+    app = FastAPI(title="Codex Router", version=__version__, lifespan=_lifespan, websocket_max_size=10 * 1024 * 1024)
 
     cm = ConfigManager(config, _config_path)
     app.state.config = config
@@ -64,6 +66,7 @@ async def _lifespan(app: FastAPI):
         timeout=config.upstream.timeout,
         limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
     )
+    logger.info("Codex Router v%s started", __version__)
     logger.info("Shared httpx.AsyncClient created (timeout=%ss)", config.upstream.timeout)
     yield
     await app.state.http_client.aclose()
@@ -94,6 +97,10 @@ def _signal_handler(signum, frame):
 def main():
     global _backup, _config, _config_path
 
+    parser = argparse.ArgumentParser(description="Codex Router")
+    parser.add_argument("--version", action="version", version=f"codex-router {__version__}")
+    parser.parse_args()
+
     config, config_path = load_config()
     _config = config
     _config_path = config_path
@@ -102,6 +109,8 @@ def main():
         level=getattr(logging, config.server.log_level.upper(), logging.INFO),
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
+
+    logger.info("Codex Router v%s starting...", __version__)
 
     if config.codex.auto_configure:
         from codex_router.codex_config import backup_codex, configure_codex

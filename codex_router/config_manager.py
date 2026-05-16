@@ -64,6 +64,7 @@ class ConfigManager:
                 api_key=self._config.upstream.api_key,
                 model=self._config.model_override or "",
                 timeout=self._config.upstream.timeout,
+                api_format=self._config.upstream.api_format,
                 created_at=time.time(),
             )
             self._presets["default"] = preset

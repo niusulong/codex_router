@@ -54,9 +54,30 @@ def create_admin_router() -> APIRouter:
 
     # ── Web UI ──
 
+    _tailwind_js: str | None = None
+
+    def _load_tailwind_js() -> str:
+        nonlocal _tailwind_js
+        if _tailwind_js is None:
+            js_path = Path(__file__).parent / "static" / "tailwind.js"
+            if js_path.exists():
+                _tailwind_js = js_path.read_text(encoding="utf-8")
+            else:
+                _tailwind_js = ""
+        return _tailwind_js
+
+    @router.get("/static/tailwind.js")
+    async def tailwind_js():
+        from fastapi.responses import Response
+        return Response(content=_load_tailwind_js(), media_type="application/javascript",
+                        headers={"Cache-Control": "public, max-age=86400"})
+
     @router.get("/", response_class=HTMLResponse)
     async def admin_page():
-        return HTMLResponse(content=_load_admin_html())
+        return HTMLResponse(
+            content=_load_admin_html(),
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
 
     # ── Config ──
 
@@ -165,8 +186,6 @@ def create_admin_router() -> APIRouter:
             config.upstream.timeout = float(body["timeout"])
         if "auto_configure" in body:
             config.codex.auto_configure = bool(body["auto_configure"])
-        if "api_format" in body:
-            config.upstream.api_format = body["api_format"]
 
         await cm.save_config()
         return {"ok": True, "message": "配置已更新"}
@@ -207,7 +226,6 @@ def create_admin_router() -> APIRouter:
             "active_preset": cm.active_preset_name,
             "ignored_builtin_tools": cm.config.ignored_builtin_tools,
             "timeout": cm.config.upstream.timeout,
-            "api_format": cm.config.upstream.api_format,
         }
         content = _json.dumps(data, indent=2, ensure_ascii=False)
         buf = BytesIO(content.encode("utf-8"))
@@ -240,8 +258,6 @@ def create_admin_router() -> APIRouter:
             cm.config.ignored_builtin_tools = body["ignored_builtin_tools"]
         if "timeout" in body:
             cm.config.upstream.timeout = float(body["timeout"])
-        if "api_format" in body:
-            cm.config.upstream.api_format = body["api_format"]
         await cm.save_config()
 
         return {"ok": True, "message": f"导入完成: {imported} 个预设已添加, {skipped} 个已跳过", "imported": imported, "skipped": skipped}
@@ -294,7 +310,7 @@ def create_admin_router() -> APIRouter:
         token_db: TokenDB | None = getattr(request.app.state, "token_db", None)
         if token_db is None:
             return {"totals": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "request_count": 0}, "by_preset": []}
-        return {"totals": token_db.get_total(), "by_preset": token_db.get_by_preset()}
+        return {"totals": token_db.get_total(), "by_preset": token_db.get_by_preset(), "by_model": token_db.get_by_model()}
 
     @router.get("/api/token/timeseries", dependencies=[Depends(_local_only)])
     async def get_token_timeseries(request: Request, period: str = "daily", days: int = 30):

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -47,7 +47,7 @@ class TokenDB:
         total_tokens: int,
         method: str = "http",
     ) -> None:
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        now = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
         self._conn.execute(
             "INSERT INTO token_usage (timestamp, preset_name, model, input_tokens, output_tokens, total_tokens, method) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -85,13 +85,34 @@ class TokenDB:
             for r in cur.fetchall()
         ]
 
+    def get_by_model(self) -> list[dict[str, Any]]:
+        cur = self._conn.execute(
+            "SELECT model, COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), "
+            "COALESCE(SUM(total_tokens),0), COUNT(*) "
+            "FROM token_usage GROUP BY model ORDER BY SUM(total_tokens) DESC"
+        )
+        return [
+            {
+                "model": r[0],
+                "input_tokens": r[1],
+                "output_tokens": r[2],
+                "total_tokens": r[3],
+                "request_count": r[4],
+            }
+            for r in cur.fetchall()
+        ]
+
+    def _local_now_str(self) -> str:
+        return datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+
     def get_daily(self, days: int = 30) -> list[dict[str, Any]]:
+        cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%dT00:00:00")
         cur = self._conn.execute(
             "SELECT date(timestamp), COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), "
             "COALESCE(SUM(total_tokens),0), COUNT(*) "
-            "FROM token_usage WHERE timestamp >= datetime('now', ?||' days') "
+            "FROM token_usage WHERE timestamp >= ? "
             "GROUP BY date(timestamp) ORDER BY date(timestamp)",
-            (str(-days),),
+            (cutoff,),
         )
         return [
             {"date": r[0], "input_tokens": r[1], "output_tokens": r[2], "total_tokens": r[3], "request_count": r[4]}
@@ -99,12 +120,13 @@ class TokenDB:
         ]
 
     def get_weekly(self, weeks: int = 12) -> list[dict[str, Any]]:
+        cutoff = (datetime.now() - timedelta(weeks=weeks)).strftime("%Y-%m-%dT00:00:00")
         cur = self._conn.execute(
             "SELECT strftime('%Y-%W', timestamp), COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), "
             "COALESCE(SUM(total_tokens),0), COUNT(*) "
-            "FROM token_usage WHERE timestamp >= datetime('now', ?||' days') "
+            "FROM token_usage WHERE timestamp >= ? "
             "GROUP BY strftime('%Y-%W', timestamp) ORDER BY 1",
-            (str(-weeks * 7),),
+            (cutoff,),
         )
         return [
             {"week": r[0], "input_tokens": r[1], "output_tokens": r[2], "total_tokens": r[3], "request_count": r[4]}
@@ -112,12 +134,13 @@ class TokenDB:
         ]
 
     def get_monthly(self, months: int = 12) -> list[dict[str, Any]]:
+        cutoff = (datetime.now() - timedelta(days=months * 30)).strftime("%Y-%m-%dT00:00:00")
         cur = self._conn.execute(
             "SELECT strftime('%Y-%m', timestamp), COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), "
             "COALESCE(SUM(total_tokens),0), COUNT(*) "
-            "FROM token_usage WHERE timestamp >= datetime('now', ?||' months') "
+            "FROM token_usage WHERE timestamp >= ? "
             "GROUP BY strftime('%Y-%m', timestamp) ORDER BY 1",
-            (str(-months),),
+            (cutoff,),
         )
         return [
             {"month": r[0], "input_tokens": r[1], "output_tokens": r[2], "total_tokens": r[3], "request_count": r[4]}
@@ -126,13 +149,12 @@ class TokenDB:
 
     def get_hourly_curve(self, date: str | None = None) -> list[dict[str, Any]]:
         if date is None:
-            date = "date('now')"
-        else:
-            date = f"'{date}'"
+            date = datetime.now().strftime("%Y-%m-%d")
         cur = self._conn.execute(
-            f"SELECT strftime('%H', timestamp), COALESCE(SUM(total_tokens),0), COUNT(*) "
-            f"FROM token_usage WHERE date(timestamp) = {date} "
-            f"GROUP BY strftime('%H', timestamp) ORDER BY 1"
+            "SELECT strftime('%H', timestamp), COALESCE(SUM(total_tokens),0), COUNT(*) "
+            "FROM token_usage WHERE date(timestamp) = ? "
+            "GROUP BY strftime('%H', timestamp) ORDER BY 1",
+            (date,),
         )
         hour_map = {r[0]: (r[1], r[2]) for r in cur.fetchall()}
         return [
