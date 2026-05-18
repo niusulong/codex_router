@@ -34,7 +34,7 @@ class LogEntry:
 class ConfigManager:
     """Runtime configuration manager: presets, hot-swap, persistence, Codex sync."""
 
-    def __init__(self, config: ProxyConfig, config_path: Path | None):
+    def __init__(self, config: ProxyConfig, config_path: Path):
         self._config = config
         self._config_path = config_path
         self._presets: dict[str, PresetConfig] = {}
@@ -217,9 +217,6 @@ class ConfigManager:
     # ── Persistence ──
 
     async def save_config(self) -> None:
-        if self._config_path is None:
-            logger.warning("No config path, skipping save")
-            return
         self._config.presets = list(self._presets.values())
         self._config.save_to_file(self._config_path)
 

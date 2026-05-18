@@ -139,8 +139,26 @@ class ProxyConfig(BaseSettings):
         _atomic_write(path, content)
 
 
-def _find_config_path() -> Path | None:
-    """Find config.yaml in current directory or script directory."""
+_DEFAULT_YAML = """\
+upstream:
+  base_url: https://api.openai.com/v1
+  api_key: ""
+  timeout: 120
+server:
+  host: 127.0.0.1
+  port: 8080
+  log_level: info
+codex:
+  auto_configure: true
+"""
+
+
+def _find_config_path() -> Path:
+    """Find config.yaml in current directory or script directory.
+
+    If not found, create a default config.yaml in the current working directory
+    so that admin panel changes are always persisted.
+    """
     candidates = [
         Path.cwd() / "config.yaml",
         Path(__file__).parent.parent / "config.yaml",
@@ -148,15 +166,18 @@ def _find_config_path() -> Path | None:
     for p in candidates:
         if p.exists():
             return p
-    return None
+
+    target = Path.cwd() / "config.yaml"
+    target.write_text(_DEFAULT_YAML, encoding="utf-8")
+    return target
 
 
-def load_config(config_path: str | None = None) -> tuple[ProxyConfig, Path | None]:
+def load_config(config_path: str | None = None) -> tuple[ProxyConfig, Path]:
     """Load config from config.yaml, with env var overrides.
 
     Priority: env vars > config.yaml > code defaults.
     Only passes non-None YAML values so env vars can still override.
-    Returns (ProxyConfig, resolved config file path or None).
+    Returns (ProxyConfig, resolved config file path).
     """
     if config_path:
         path = Path(config_path)
@@ -165,7 +186,7 @@ def load_config(config_path: str | None = None) -> tuple[ProxyConfig, Path | Non
 
     init_values: dict = {}
 
-    if path and path.exists():
+    if path.exists():
         with open(path, encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
 

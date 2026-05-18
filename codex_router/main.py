@@ -2,15 +2,18 @@
 
 import argparse
 import atexit
+import json
 import logging
 import signal
 import threading
 import webbrowser
 from pathlib import Path
+from typing import Any
 
 import httpx
 import uvicorn
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 
 from codex_router.codex_config import restore_codex
 from codex_router.config import ProxyConfig, load_config
@@ -25,11 +28,22 @@ from codex_router.token_db import TokenDB
 logger = logging.getLogger(__name__)
 
 _backup = None
-_config = None
-_config_path = None
+_config: ProxyConfig | None = None
+_config_path: Path | None = None
 
 
-def create_app(config: ProxyConfig | None = None, config_path=None) -> FastAPI:
+class UnicodeJSONResponse(JSONResponse):
+    def render(self, content: Any) -> bytes:
+        return json.dumps(
+            content,
+            ensure_ascii=False,
+            allow_nan=False,
+            indent=None,
+            separators=(",", ":"),
+        ).encode("utf-8")
+
+
+def create_app(config: ProxyConfig | None = None, config_path: Path | None = None) -> FastAPI:
     """Create and configure the FastAPI application."""
     global _config, _config_path
     if config is not None:
@@ -39,13 +53,14 @@ def create_app(config: ProxyConfig | None = None, config_path=None) -> FastAPI:
         _config, _config_path = load_config()
     config = _config
 
-    app = FastAPI(title="Codex Router", version=__version__, lifespan=_lifespan, websocket_max_size=10 * 1024 * 1024)
+    app = FastAPI(title="Codex Router", version=__version__, lifespan=_lifespan, default_response_class=UnicodeJSONResponse, websocket_max_size=10 * 1024 * 1024)
 
+    assert _config_path is not None
     cm = ConfigManager(config, _config_path)
     app.state.config = config
     app.state.config_manager = cm
     app.state.response_store = ResponseStore()
-    db_path = _config_path.parent / "token_usage.db" if _config_path else Path("token_usage.db")
+    db_path = _config_path.parent / "token_usage.db"
     token_db = TokenDB(db_path)
     app.state.token_db = token_db
     app.state.request_stats = RequestStats(token_db=token_db)

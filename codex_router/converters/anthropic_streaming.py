@@ -57,7 +57,7 @@ async def convert_anthropic_stream(
 ) -> AsyncGenerator[str, None]:
     """Consume Anthropic SSE lines, yield Responses API SSE event strings."""
     async for event_type, data in convert_anthropic_stream_events(upstream_lines, model):
-        yield f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
+        yield f"event: {event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
 async def convert_anthropic_stream_events(

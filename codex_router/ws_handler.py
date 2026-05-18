@@ -152,7 +152,7 @@ async def _handle_response_create(ws: WebSocket, event: dict[str, Any], config: 
             output: list[dict[str, Any]] = []
             completed_usage: dict[str, int] = {}
             async for event_type, data in stream_events:
-                await ws.send_json(data)
+                await ws.send_text(json.dumps(data, ensure_ascii=False))
                 if event_type == "response.completed":
                     resp_data = data.get("response", {})
                     response_id = resp_data.get("id")
