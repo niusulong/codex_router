@@ -25,7 +25,7 @@ def convert_anthropic_request(req: ResponsesRequest, config: ProxyConfig) -> dic
     messages = _convert_input(req.input)
 
     anthropic_req: dict[str, Any] = {
-        "model": config.model_override or req.model,
+        "model": req.model,
         "messages": messages,
         "max_tokens": req.max_output_tokens if req.max_output_tokens is not None else 16384,
     }

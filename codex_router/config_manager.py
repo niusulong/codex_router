@@ -1,4 +1,4 @@
-"""ConfigManager: runtime preset management, hot-swap, persistence, Codex sync."""
+﻿"""ConfigManager: runtime preset management, hot-swap, persistence, Codex sync."""
 
 from __future__ import annotations
 
@@ -62,7 +62,7 @@ class ConfigManager:
                 name="default",
                 base_url=self._config.upstream.base_url,
                 api_key=self._config.upstream.api_key,
-                model=self._config.model_override or "",
+                model="default",
                 timeout=self._config.upstream.timeout,
                 api_format=self._config.upstream.api_format,
                 created_at=time.time(),
@@ -127,6 +127,27 @@ class ConfigManager:
         self._add_log("删除预设", name)
         logger.info("删除预设: %s", name)
 
+    # ── Model Switch ──
+
+    async def switch_model(self, name: str, model: str) -> None:
+        preset = self._presets.get(name)
+        if preset is None:
+            raise KeyError(f"预设 {name} 不存在")
+        if preset.models and model not in preset.models:
+            raise ValueError(f"模型 {model} 不在预设 {name} 的可用模型列表中")
+
+        old_model = preset.model
+        preset.model = model
+        self._config.presets = list(self._presets.values())
+
+        if name == self._active_preset:
+            await self._apply_preset_to_config(preset)
+        else:
+            await self.save_config()
+
+        self._add_log("切换模型", f"{name}: {old_model} → {model}")
+        logger.info("切换模型: %s: %s → %s", name, old_model, model)
+
     # ── Hot Swap ──
 
     async def activate_preset(self, name: str) -> None:
@@ -135,9 +156,9 @@ class ConfigManager:
             raise KeyError(f"预设 {name} 不存在")
 
         old_name = self._active_preset
-        await self._apply_preset_to_config(preset)
         self._active_preset = name
         self._config.active_preset = name
+        await self._apply_preset_to_config(preset)
         self._add_log("切换预设", f"{old_name} → {name}")
         logger.info("切换预设: %s → %s", old_name, name)
 
@@ -146,12 +167,14 @@ class ConfigManager:
         self._config.upstream.base_url = preset.base_url
         self._config.upstream.api_key = preset.api_key
         self._config.upstream.timeout = preset.timeout
-        self._config.model_override = preset.model
         self._config.upstream.api_format = getattr(preset, 'api_format', 'openai')
 
         if self._config.codex.auto_configure:
             try:
-                configure_codex(self._config)
+                models_path = configure_codex(self._config, preset)
+                from codex_router.main import _backup
+                if _backup and models_path:
+                    _backup.models_path = models_path
             except Exception:
                 logger.exception("Codex CLI 配置同步失败")
 

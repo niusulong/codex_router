@@ -93,7 +93,8 @@ def create_admin_router() -> APIRouter:
                 "api_format": config.upstream.api_format,
                 "timeout": config.upstream.timeout,
             },
-            "model_override": config.model_override,
+            "active_model": config.active_model,
+            "active_models": cm.get_preset(cm.active_preset_name).models if cm.active_preset_name and cm.get_preset(cm.active_preset_name) else [],
             "server": {
                 "host": config.server.host,
                 "port": config.server.port,
@@ -158,8 +159,25 @@ def create_admin_router() -> APIRouter:
             "ok": True,
             "message": f"已切换到预设 {name}",
             "active_preset": name,
-            "model": cm.config.model_override,
+            "model": cm.config.active_model,
         }
+
+    # ── Switch Model ──
+
+    @router.post("/api/presets/{name}/switch-model", dependencies=[Depends(_local_only)])
+    async def switch_model(name: str, request: Request):
+        cm: ConfigManager = request.app.state.config_manager
+        body = await request.json()
+        model = body.get("model")
+        if not model:
+            raise HTTPException(status_code=400, detail="缺少 model 参数")
+        try:
+            await cm.switch_model(name, model)
+        except KeyError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        return {"ok": True, "message": f"已切换模型到 {model}", "model": model}
 
     # ── Verify ──
 

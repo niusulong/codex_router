@@ -105,7 +105,7 @@
             </div>
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
                 <div><span class="text-gray-400">预设</span><div id="cfg-preset" class="font-semibold text-lg mt-0.5">-</div></div>
-                <div><span class="text-gray-400">模型</span><div id="cfg-model" class="font-semibold mt-0.5 truncate">-</div></div>
+                <div><span class="text-gray-400">模型</span><div id="cfg-model" class="font-semibold mt-0.5 truncate">-</div><div id="cfg-models-tags" class="flex flex-wrap gap-1 mt-1"></div></div>
                 <div><span class="text-gray-400">上游地址</span><div id="cfg-upstream" class="font-mono text-xs mt-1 truncate">-</div></div>
                 <div><span class="text-gray-400">API 格式</span><div id="cfg-format" class="mt-0.5"><span class="px-2 py-0.5 text-xs rounded-full bg-gray-100 dark:bg-gray-700">openai</span></div></div>
             </div>
@@ -306,8 +306,16 @@
                 <input type="text" id="f-api-key" class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:outline-none">
             </div>
             <div>
-                <label class="block text-sm font-medium mb-1">模型</label>
+                <label class="block text-sm font-medium mb-1">默认模型</label>
                 <input type="text" id="f-model" required class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:outline-none">
+            </div>
+            <div>
+                <label class="block text-sm font-medium mb-1">可用模型列表 <span class="text-gray-400 font-normal text-xs">(按回车添加，支持多个模型切换)</span></label>
+                <div id="f-models-tags" class="flex flex-wrap gap-1.5 mb-2"></div>
+                <div class="flex gap-2">
+                    <input type="text" id="f-models-input" placeholder="输入模型名" class="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-1.5 text-sm focus:ring-2 focus:ring-primary-500 focus:outline-none" onkeydown="if(event.key==='Enter'){addDialogModel();event.preventDefault()}">
+                    <button onclick="addDialogModel()" type="button" class="px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">添加</button>
+                </div>
             </div>
             <div class="grid grid-cols-2 gap-4">
                 <div>
@@ -350,6 +358,7 @@ const API = '/admin/api';
 let _editingName = null;
 let _confirmResolve = null;
 let _tools = [];
+let _dialogModels = [];
 let _statsTimer = null;
 let _currentTab = 'dashboard';
 
@@ -470,7 +479,16 @@ async function loadDashboard() {
     document.getElementById('stat-last').textContent = timeAgo(stats.last_request_at);
 
     document.getElementById('cfg-preset').textContent = config.active_preset || '-';
-    document.getElementById('cfg-model').textContent = config.model_override || '-';
+    document.getElementById('cfg-model').textContent = config.active_model || '-';
+    const models = config.active_models || [];
+    const modelsEl = document.getElementById('cfg-models-tags');
+    if (models.length > 1) {
+        modelsEl.innerHTML = models.map(m =>
+            `<span class="px-1.5 py-0.5 text-xs rounded ${m === config.active_model ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 font-medium' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'}">${esc(m)}</span>`
+        ).join('');
+    } else {
+        modelsEl.innerHTML = '';
+    }
     document.getElementById('cfg-upstream').textContent = config.upstream.base_url;
     const fmt = config.upstream.api_format || 'openai';
     document.getElementById('cfg-format').innerHTML = `<span class="px-2 py-0.5 text-xs rounded-full ${fmt === 'anthropic' ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400' : 'bg-gray-100 dark:bg-gray-700'}">${esc(fmt)}</span>`;
@@ -586,6 +604,7 @@ async function deletePreset(name) {
 
 function openAddDialog() {
     _editingName = null;
+    _dialogModels = [];
     document.getElementById('dialog-title').textContent = '添加预设';
     document.getElementById('f-name').value = '';
     document.getElementById('f-name').disabled = false;
@@ -595,6 +614,7 @@ function openAddDialog() {
     document.getElementById('f-model').value = '';
     document.getElementById('f-timeout').value = '120';
     document.getElementById('f-api-format').value = 'openai';
+    renderDialogModels();
     document.getElementById('preset-dialog').showModal();
 }
 
@@ -603,6 +623,7 @@ async function openEditDialog(name) {
     const p = presets.find(x => x.name === name);
     if (!p) return;
     _editingName = name;
+    _dialogModels = (p.models && p.models.length) ? [...p.models] : (p.model ? [p.model] : []);
     document.getElementById('dialog-title').textContent = '编辑预设';
     document.getElementById('f-name').value = p.name;
     document.getElementById('f-name').disabled = true;
@@ -612,6 +633,7 @@ async function openEditDialog(name) {
     document.getElementById('f-model').value = p.model;
     document.getElementById('f-timeout').value = p.timeout;
     document.getElementById('f-api-format').value = p.api_format || 'openai';
+    renderDialogModels();
     document.getElementById('preset-dialog').showModal();
 }
 
@@ -619,11 +641,34 @@ function closeDialog() {
     document.getElementById('preset-dialog').close();
 }
 
+function addDialogModel() {
+    const input = document.getElementById('f-models-input');
+    const val = input.value.trim();
+    if (val && !_dialogModels.includes(val)) {
+        _dialogModels.push(val);
+        renderDialogModels();
+    }
+    input.value = '';
+}
+
+function removeDialogModel(name) {
+    _dialogModels = _dialogModels.filter(m => m !== name);
+    renderDialogModels();
+}
+
+function renderDialogModels() {
+    const container = document.getElementById('f-models-tags');
+    container.innerHTML = _dialogModels.map(m =>
+        `<span class="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-lg bg-gray-100 dark:bg-gray-700">${esc(m)}<button type="button" onclick="removeDialogModel('${esc(m)}')" class="hover:text-danger-500 transition-colors"><svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg></button></span>`
+    ).join('');
+}
+
 async function submitPreset() {
     const data = {
         base_url: document.getElementById('f-base-url').value,
         api_key: document.getElementById('f-api-key').value,
         model: document.getElementById('f-model').value,
+        models: [..._dialogModels],
         timeout: parseFloat(document.getElementById('f-timeout').value) || 120,
         api_format: document.getElementById('f-api-format').value,
     };

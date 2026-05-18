@@ -1,4 +1,4 @@
-"""Configuration loader supporting config.yaml and env vars."""
+﻿"""Configuration loader supporting config.yaml and env vars."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ class PresetConfig(BaseModel):
     base_url: str
     api_key: str
     model: str
+    models: list[str] = Field(default_factory=list, description="可用模型列表")
     timeout: float = 120.0
     api_format: str = "openai"
     created_at: Optional[float] = None
@@ -82,10 +83,6 @@ class ProxyConfig(BaseSettings):
         ],
         description="Responses API built-in tool types to filter out",
     )
-    model_override: Optional[str] = Field(
-        default=None,
-        description="If set, override the model name in all requests",
-    )
     presets: list[PresetConfig] = Field(
         default_factory=list,
         description="Model preset configurations",
@@ -96,6 +93,15 @@ class ProxyConfig(BaseSettings):
     )
 
     model_config = {"env_prefix": "CODEX_ROUTER_", "env_nested_delimiter": "__"}
+
+    @property
+    def active_model(self) -> str:
+        """Get the model from the currently active preset."""
+        if self.active_preset:
+            for p in self.presets:
+                if p.name == self.active_preset:
+                    return p.model
+        return "default"
 
     def to_yaml_dict(self) -> dict:
         """Serialize to a YAML-friendly dict."""
@@ -116,8 +122,6 @@ class ProxyConfig(BaseSettings):
             d["passthrough_api_key"] = self.passthrough_api_key
         if self.ignored_builtin_tools:
             d["ignored_builtin_tools"] = self.ignored_builtin_tools
-        if self.model_override:
-            d["model_override"] = self.model_override
         d["codex"] = {"auto_configure": self.codex.auto_configure}
         if self.codex.config_dir:
             d["codex"]["config_dir"] = self.codex.config_dir
@@ -171,9 +175,10 @@ def load_config(config_path: str | None = None) -> tuple[ProxyConfig, Path | Non
             init_values["server"] = {k: v for k, v in data["server"].items() if v is not None}
         if "codex" in data and data["codex"]:
             init_values["codex"] = {k: v for k, v in data["codex"].items() if v is not None}
-        for key in ("passthrough_api_key", "ignored_builtin_tools", "model_override"):
+        for key in ("passthrough_api_key", "ignored_builtin_tools"):
             if key in data and data[key] is not None:
                 init_values[key] = data[key]
+        # model_override is no longer used; silently ignored if present in config
         if "presets" in data and data["presets"] is not None:
             init_values["presets"] = data["presets"]
         if "active_preset" in data and data["active_preset"] is not None:

@@ -28,7 +28,7 @@ def convert_request(req: ResponsesRequest, config: ProxyConfig) -> dict[str, Any
         messages.insert(0, {"role": "system", "content": req.instructions})
 
     # Build the Chat Completions request
-    cc_req: dict[str, Any] = {"model": config.model_override or req.model, "messages": messages}
+    cc_req: dict[str, Any] = {"model": req.model, "messages": messages}
 
     if req.tools is not None:
         cc_tools = _convert_tools(req.tools, config)

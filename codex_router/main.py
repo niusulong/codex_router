@@ -94,6 +94,16 @@ def _signal_handler(signum, frame):
     raise SystemExit(128 + signum)
 
 
+def _get_active_preset(config: ProxyConfig):
+    """Get the active preset from config."""
+    if not config.active_preset or not config.presets:
+        return None
+    for p in config.presets:
+        if p.name == config.active_preset:
+            return p
+    return None
+
+
 def main():
     global _backup, _config, _config_path
 
@@ -119,7 +129,10 @@ def main():
         from codex_router.codex_config import backup_codex, configure_codex
 
         _backup = backup_codex(config)
-        configure_codex(config)
+        active_preset = _get_active_preset(config)
+        models_path = configure_codex(config, active_preset)
+        if models_path:
+            _backup.models_path = models_path
 
         atexit.register(_restore_on_exit)
         signal.signal(signal.SIGTERM, _signal_handler)
