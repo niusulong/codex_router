@@ -19,6 +19,12 @@ Codex CLI 默认只支持 OpenAI 官方 API。Codex Router 在本地启动一个
 pip install codex-router-proxy
 ```
 
+已安装旧版本时，需要加 `--upgrade` 才会更新到最新版：
+
+```bash
+pip install codex-router-proxy --upgrade
+```
+
 ### 2. 创建配置文件
 
 在工作目录下创建 `config.yaml`，填入你的模型服务商信息：
